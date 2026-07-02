@@ -26,12 +26,14 @@ def test_quarter_breakdown_returns_expected_shape() -> None:
 
 
 def test_day_filter_is_applied() -> None:
+    sample_day = get_pgta_dataset().eligible_records[0].created_at.strftime("%Y年%-m月%-d号")
+    sample_day_key = get_pgta_dataset().eligible_records[0].created_at.strftime("%Y-%m-%d")
     result = query_service.run(
         "pgt_total_volume",
-        {**BASE_FILTERS, "time_range": "2025年7月15号", "breakdown": "day", "focus": "summary"},
+        {**BASE_FILTERS, "time_range": sample_day, "breakdown": "day", "focus": "summary"},
     )
     assert result["table"]["rows"]
-    assert result["table"]["rows"][0][0] == "2025-07-15"
+    assert result["table"]["rows"][0][0] == sample_day_key
     assert result["evidence"]["status"] == "ready"
 
 

@@ -145,26 +145,14 @@ class QueryService:
 
     def _pgta_age_distribution(self, records: list[DetailRecord], filters: dict[str, str]) -> dict:
         groups = {
-            "<35": [],
-            "35-37": [],
-            "38-40": [],
-            "41-43": [],
-            ">=44": [],
+            "＜35岁": [],
+            "35-38岁": [],
+            "＞38岁": [],
             "未填写": [],
         }
         for item in records:
-            if item.age is None:
-                groups["未填写"].append(item)
-            elif item.age < 35:
-                groups["<35"].append(item)
-            elif item.age <= 37:
-                groups["35-37"].append(item)
-            elif item.age <= 40:
-                groups["38-40"].append(item)
-            elif item.age <= 43:
-                groups["41-43"].append(item)
-            else:
-                groups[">=44"].append(item)
+            label = item.age_label if item.age_label in groups else "未填写"
+            groups[label].append(item)
 
         rows = []
         chart_categories: list[str] = []

@@ -28,6 +28,7 @@ class DetailRecord:
     qc_conclusion: str
     ldpgta_qc_conclusion: str
     age: int | None
+    age_label: str
     mapd: float | None
     bincv: float | None
     cnvpq: float | None
@@ -98,6 +99,22 @@ def _parse_age(value: object) -> int | None:
         return None
 
 
+def _normalize_age_label(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "未填写"
+    mapping = {
+        "<35岁": "＜35岁",
+        "35-37岁": "35-38岁",
+        "35-38岁": "35-38岁",
+        ">38岁": "＞38岁",
+        ">=39岁": "＞38岁",
+        "＞38岁": "＞38岁",
+        "未填写": "未填写",
+    }
+    return mapping.get(text, text)
+
+
 def _to_float(value: object) -> float | None:
     if value in (None, ""):
         return None
@@ -152,7 +169,8 @@ class PGTADetailDataset:
             cycle_id = str(value(row, "送检单编号") or "").strip()
             sample_name = str(value(row, "送检单样本名称") or "").strip()
             product_name = str(value(row, "产品英文简写") or "").strip()
-            age = _parse_age(value(row, "受检人年龄（人工处理）", "受检人年龄（系统）", "受检人年龄"))
+            age_label = _normalize_age_label(value(row, "受检人年龄（人工处理）"))
+            age = _parse_age(value(row, "受检人年龄（系统）", "受检人年龄"))
 
             records.append(
                 DetailRecord(
@@ -171,6 +189,7 @@ class PGTADetailDataset:
                     qc_conclusion=str(value(row, "data_QC_conclusion") or "").strip(),
                     ldpgta_qc_conclusion="",
                     age=age,
+                    age_label=age_label,
                     mapd=None,
                     bincv=_to_float(value(row, "CV(1000K_bin_size)")),
                     cnvpq=None,
@@ -249,7 +268,7 @@ class PGTADetailDataset:
             if day is not None:
                 filtered = [item for item in filtered if item.created_at.day == day]
         if age_range:
-            filtered = [item for item in filtered if _match_age_range(item.age, age_range)]
+            filtered = [item for item in filtered if _match_age_range(item.age, item.age_label, age_range)]
         return filtered
 
     @property
@@ -315,20 +334,48 @@ def _in_month_range(
     return start <= current <= end
 
 
-def _match_age_range(age: int | None, age_range: str) -> bool:
+def _match_age_range(age: int | None, age_label: str, age_range: str) -> bool:
     if age_range == "missing":
-        return age is None
-    if age is None:
-        return False
+        return age is None or age_label == "未填写"
+    if age_range == "bucket:35-38":
+        return age_label == "35-38岁"
+    if age_range == "bucket:gt38":
+        return age_label == "＞38岁"
+    if age_range == "bucket:lt35":
+        return age_label == "＜35岁"
     if age_range.startswith("gt:"):
-        return age > int(age_range.split(":", 1)[1])
+        threshold = int(age_range.split(":", 1)[1])
+        if threshold == 35 and age_label in {"35-38岁", "＞38岁"}:
+            return True
+        if age is not None:
+            return age > threshold
+        return False
     if age_range.startswith("gte:"):
-        return age >= int(age_range.split(":", 1)[1])
+        threshold = int(age_range.split(":", 1)[1])
+        if threshold == 35 and age_label in {"35-38岁", "＞38岁"}:
+            return True
+        if age is not None:
+            return age >= threshold
+        return False
     if age_range.startswith("lt:"):
-        return age < int(age_range.split(":", 1)[1])
+        threshold = int(age_range.split(":", 1)[1])
+        if age is not None:
+            return age < threshold
+        return age_label == "＜35岁" if threshold == 35 else False
     if age_range.startswith("lte:"):
-        return age <= int(age_range.split(":", 1)[1])
+        threshold = int(age_range.split(":", 1)[1])
+        if age is not None:
+            return age <= threshold
+        return age_label in {"＜35岁", "35-38岁"} if threshold in {37, 38} else False
     if age_range.startswith("between:"):
         start, end = age_range.split(":", 1)[1].split(",", 1)
-        return int(start) <= age <= int(end)
+        start_i = int(start)
+        end_i = int(end)
+        if start_i == 35 and end_i in {37, 38} and age_label == "35-38岁":
+            return True
+        if age is not None:
+            return start_i <= age <= end_i
+        return False
+    if age is None:
+        return False
     return True
