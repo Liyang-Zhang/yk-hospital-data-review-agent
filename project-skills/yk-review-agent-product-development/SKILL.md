@@ -7,6 +7,17 @@ description: Use when working on this repository's product logic, especially int
 
 This skill governs product-facing development for the hospital PGT review agent.
 
+## Fast Start
+
+Before reading large history, prefer these short project docs in order:
+
+1. `docs/当前产品边界速记.md`
+2. `docs/执行级技术架构方案.md`
+3. `docs/PGTA问法标准答案基线-20260702.md`
+4. `docs/V0.2路由语料回归说明.md`
+
+Only open longer docs like `人工测试说明` or `PGTA指标计算说明` when the current task truly needs them.
+
 Use it whenever the task touches:
 
 - intent recognition
