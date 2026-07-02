@@ -424,19 +424,29 @@ class QueryService:
         rows = []
         for key, bucket in grouped.items():
             one_to_four = sum(1 for item in bucket if _is_syndrome_micro_cnv(item, 1, 4))
-            four_to_ten_mosaic = sum(1 for item in bucket if _is_mosaic_cnv(item, 4, 10, 50, 100, require_syndrome=True))
-            ten_plus_low_mosaic = sum(1 for item in bucket if _is_mosaic_cnv(item, 10, None, 20, 30, require_syndrome=False))
+            four_to_ten_mosaic = sum(
+                1 for item in bucket if _is_incidental_mosaic_cnv(item, 4, 10, 50, 100, require_syndrome=True)
+            )
+            ten_plus_low_mosaic = sum(
+                1 for item in bucket if _is_incidental_mosaic_cnv(item, 10, None, 20, 30, require_syndrome=False)
+            )
             pseudoautosomal = sum(1 for item in bucket if _is_pseudoautosomal_deletion(item))
             rows.append([key, one_to_four, four_to_ten_mosaic, ten_plus_low_mosaic, pseudoautosomal])
 
         return {
             "metric_id": "pgta_special_cnv_overview",
             "filters": filters,
-            "summary": "已按医学部确认的附加规则统计当前快照中的特殊 CNV 提示，包括综合征相关微缺失/重复、特定比例嵌合异常和拟常染色体区域异常。",
+            "summary": "已在意外发现胚胎范围内统计当前快照中的特殊 CNV 提示，包括 1Mb~4Mb 综合征相关微缺失/重复、4Mb~10Mb 且≥50%嵌合且综合征相关提示、≥10Mb 且20%~30%比例区间提示，以及拟常染色体区域缺失。",
             "evidence": {"status": "ready", "record_count": len(records), "breakdown": breakdown},
             "table": {
                 "title": "PGT-A 特殊 CNV 提示总览",
-                "columns": [self._breakdown_label(breakdown), "1Mb~4Mb 综合征相关提示", "4Mb~10Mb 且≥50%嵌合", "≥10Mb 且20%~30%嵌合", "拟常染色体区域缺失"],
+                "columns": [
+                    self._breakdown_label(breakdown),
+                    "1Mb~4Mb 综合征相关提示",
+                    "4Mb~10Mb 且≥50%嵌合且综合征相关",
+                    "≥10Mb 且20%~30%嵌合",
+                    "拟常染色体区域缺失",
+                ],
                 "rows": rows,
             },
             "chart": None,
@@ -643,13 +653,19 @@ def _has_known_syndrome(detail: str) -> bool:
     return "包含已知综合征" in text and "无已知综合征" not in text
 
 
+def _is_incidental(item: DetailRecord) -> bool:
+    return item.incidental_label == "有"
+
+
 def _is_syndrome_micro_cnv(item: DetailRecord, min_mb: float, max_mb: float) -> bool:
     hint = item.ldpgta_cnv_type or ""
     sizes = _hint_sizes(hint)
-    return any(min_mb <= size < max_mb for size in sizes) and _has_known_syndrome(item.result_detail)
+    return _is_incidental(item) and any(min_mb <= size < max_mb for size in sizes) and _has_known_syndrome(
+        item.result_detail
+    )
 
 
-def _is_mosaic_cnv(
+def _is_incidental_mosaic_cnv(
     item: DetailRecord,
     min_mb: float,
     max_mb: float | None,
@@ -658,7 +674,7 @@ def _is_mosaic_cnv(
     *,
     require_syndrome: bool,
 ) -> bool:
-    if not item.is_mosaic:
+    if not _is_incidental(item):
         return False
     sizes = _hint_sizes(item.ldpgta_cnv_type)
     pcts = _hint_percentages(item.ldpgta_cnv_type)
@@ -670,6 +686,8 @@ def _is_mosaic_cnv(
 
 
 def _is_pseudoautosomal_deletion(item: DetailRecord) -> bool:
+    if not _is_incidental(item):
+        return False
     hint = (item.ldpgta_cnv_type or "").lower()
     detail = (item.result_detail or "").lower()
     return ("del(" in hint and "p22.33" in hint and "(x)" in hint) or ("x染色体p22.33" in detail and "缺失" in detail)

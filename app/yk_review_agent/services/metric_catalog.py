@@ -163,7 +163,7 @@ METRICS: tuple[MetricDefinition, ...] = (
         supported_breakdowns=("overall", "month", "quarter"),
         supported_time_grains=("overall", "month", "quarter"),
         business_terms=("1Mb", "4Mb", "10Mb", "提示CNV", "综合征", "拟常染色体", "p22.33"),
-        data_requirements=("cnv_hint", "result_detail", "sample_id", "stat_month"),
+        data_requirements=("cnv_hint", "result_detail", "incidental_label", "sample_id", "stat_month"),
         unsupported_combinations=("day", "age", "qc", "result"),
         default_card_types=("summary", "table"),
         default_chart_type=None,
@@ -235,9 +235,15 @@ SUPPORTED_DOMAIN_TERMS: tuple[str, ...] = (
     "年龄",
     "医院",
     "结果分布",
+    "CNV",
+    "意外发现",
+    "综合征",
+    "拟常染色体",
+    "p22.33",
 )
 
-ACTIVE_DATA_CAPABILITIES: frozenset[str] = get_snapshot_registry().active_capabilities("PGT-A")
+def active_data_capabilities(product_code: str = "PGT-A") -> frozenset[str]:
+    return get_snapshot_registry().active_capabilities(product_code)
 
 CLARIFY_PROMPTS: list[str] = [
     "看一下当前快照下的 PGT-A 送检量",

@@ -8,10 +8,10 @@ from yk_review_agent.models.intent import ParsedIntent
 from yk_review_agent.services.business_request_service import business_request_service
 from yk_review_agent.services.function_resolver import function_resolver
 from yk_review_agent.services.metric_catalog import (
-    ACTIVE_DATA_CAPABILITIES,
     CLARIFY_PROMPTS,
     REFUSE_SUGGESTIONS,
     SUPPORTED_DOMAIN_TERMS,
+    active_data_capabilities,
     get_metric,
 )
 
@@ -223,7 +223,7 @@ class AnswerabilityPolicy:
                 normalized_message=parsed.normalized_message,
             )
 
-        if not set(metric.data_requirements).issubset(ACTIVE_DATA_CAPABILITIES):
+        if not set(metric.data_requirements).issubset(active_data_capabilities("PGT-A")):
             return AnalysisPlan(
                 product_scope="PGT-A",
                 breakdown=parsed.breakdown,

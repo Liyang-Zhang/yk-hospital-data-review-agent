@@ -112,7 +112,55 @@ def test_multi_topic_question_clarifies_instead_of_picking_first_metric() -> Non
     )
 
     assert plan.answer_mode == "clarify"
-    assert plan.candidate_metric_ids == ["pgta_euploid_rate", "pgt_total_volume"]
+    assert plan.candidate_metric_ids == ["pgt_total_volume", "pgta_euploid_rate"]
+
+
+def test_oral_multi_metric_question_clarifies_with_age_filter_preserved() -> None:
+    message = "山西妇幼在25年7月到10月年龄大于35岁的患者送了多少周期，整倍体率如何"
+    parsed = _parse(message)
+
+    plan = answerability_policy.evaluate(
+        message=message,
+        parsed=parsed,
+        hospital_id="山西省妇幼保健院",
+        hospital_name="山西省妇幼保健院",
+    )
+
+    assert parsed.normalized_message.startswith("山西省妇幼保健院")
+    assert parsed.time_range == "2025年7月到2025年10月"
+    assert parsed.age_range == "gt:35"
+    assert plan.answer_mode == "clarify"
+    assert plan.candidate_metric_ids == ["pgt_total_volume", "pgta_euploid_rate"]
+
+
+def test_oral_special_cnv_question_answers() -> None:
+    message = "想看一下意外发现里面那些1Mb到4Mb综合征相关提示多不多"
+    parsed = _parse(message)
+
+    plan = answerability_policy.evaluate(
+        message=message,
+        parsed=parsed,
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+    )
+
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgta_special_cnv_overview"
+
+
+def test_special_cnv_and_result_overview_conflict_clarifies() -> None:
+    message = "4Mb到10Mb且高比例嵌合这类情况帮我汇总一下"
+    parsed = _parse(message)
+
+    plan = answerability_policy.evaluate(
+        message=message,
+        parsed=parsed,
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+    )
+
+    assert plan.answer_mode == "clarify"
+    assert plan.candidate_metric_ids == ["pgta_special_cnv_overview", "pgta_mosaic_abnormal"]
 
 
 def test_structured_business_request_without_scope_clarifies() -> None:

@@ -93,3 +93,152 @@ def test_clarify_response_returns_clarify_payload() -> None:
     assert response.structured_answer.answer_mode == "clarify"
     assert response.clarify_payload is not None
     assert "主指标" in response.clarify_payload.missing_parts
+
+
+def test_multiturn_followup_chain_preserves_context_and_switches_metric() -> None:
+    session = session_store.create_session(
+        SessionCreateRequest(
+            user_id="demo-user",
+            hospital_id=HOSPITAL_ID,
+            hospital_name="中国人民解放军医院301医院",
+            host_session_id="host-session-4",
+        )
+    )
+    host_context = HostContext(
+        user_id="demo-user",
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+        host_session_id="host-session-4",
+    )
+
+    first = conversation_agent.handle(
+        ChatRequest(session_id=session.session_id, message="看7月送检量", host_context=host_context),
+        session,
+    )
+    assert first.structured_answer.answer_mode == "answer"
+    assert first.structured_answer.metric_ids == ["pgt_total_volume"]
+    assert first.route_trace is not None
+    assert first.route_trace.filters["time_range"] == "7月"
+
+    second = conversation_agent.handle(
+        ChatRequest(session_id=session.session_id, message="那整倍体率呢", host_context=host_context),
+        session_store.get_session(session.session_id),
+    )
+    assert second.structured_answer.answer_mode == "answer"
+    assert second.structured_answer.metric_ids == ["pgta_euploid_rate"]
+    assert second.route_trace is not None
+    assert second.route_trace.filters["time_range"] == "7月"
+
+    third = conversation_agent.handle(
+        ChatRequest(session_id=session.session_id, message="那35岁以上呢", host_context=host_context),
+        session_store.get_session(session.session_id),
+    )
+    assert third.structured_answer.answer_mode == "answer"
+    assert third.structured_answer.metric_ids == ["pgta_euploid_rate"]
+    assert third.route_trace is not None
+    assert third.route_trace.filters["age_range"] == "gt:35"
+    assert third.route_trace.filters["time_range"] == "7月"
+
+    fourth = conversation_agent.handle(
+        ChatRequest(session_id=session.session_id, message="那异常率呢", host_context=host_context),
+        session_store.get_session(session.session_id),
+    )
+    assert fourth.structured_answer.answer_mode == "answer"
+    assert fourth.structured_answer.metric_ids == ["pgta_mosaic_abnormal"]
+    assert fourth.route_trace is not None
+    assert fourth.route_trace.filters["age_range"] == "gt:35"
+    assert fourth.route_trace.filters["time_range"] == "7月"
+
+
+def test_multiturn_explicit_new_metric_overrides_previous_topic() -> None:
+    session = session_store.create_session(
+        SessionCreateRequest(
+            user_id="demo-user",
+            hospital_id=HOSPITAL_ID,
+            hospital_name="中国人民解放军医院301医院",
+            host_session_id="host-session-5",
+        )
+    )
+    host_context = HostContext(
+        user_id="demo-user",
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+        host_session_id="host-session-5",
+    )
+
+    first = conversation_agent.handle(
+        ChatRequest(session_id=session.session_id, message="看一下 PGT-A 的结果分布", host_context=host_context),
+        session,
+    )
+    assert first.structured_answer.metric_ids == ["pgta_mosaic_abnormal"]
+
+    second = conversation_agent.handle(
+        ChatRequest(session_id=session.session_id, message="再看一下质控情况", host_context=host_context),
+        session_store.get_session(session.session_id),
+    )
+    assert second.structured_answer.answer_mode == "answer"
+    assert second.structured_answer.metric_ids == ["pgta_quality_overview"]
+    assert second.route_trace is not None
+    assert second.route_trace.resolved_metric_id == "pgta_quality_overview"
+
+
+def test_special_cnv_oral_question_returns_special_cnv_result_card() -> None:
+    session = session_store.create_session(
+        SessionCreateRequest(
+            user_id="demo-user",
+            hospital_id=HOSPITAL_ID,
+            hospital_name="中国人民解放军医院301医院",
+            host_session_id="host-session-special-cnv",
+        )
+    )
+    host_context = HostContext(
+        user_id="demo-user",
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+        host_session_id="host-session-special-cnv",
+    )
+
+    response = conversation_agent.handle(
+        ChatRequest(
+            session_id=session.session_id,
+            message="想看一下意外发现里面那些1Mb到4Mb综合征相关提示多不多",
+            host_context=host_context,
+        ),
+        session,
+    )
+
+    assert response.structured_answer.answer_mode == "answer"
+    assert response.structured_answer.metric_ids == ["pgta_special_cnv_overview"]
+    assert response.route_trace is not None
+    assert response.route_trace.resolved_metric_id == "pgta_special_cnv_overview"
+    assert any(card.title == "PGT-A 特殊 CNV 提示总览" for card in response.result_cards)
+
+
+def test_special_cnv_ambiguous_question_clarifies() -> None:
+    session = session_store.create_session(
+        SessionCreateRequest(
+            user_id="demo-user",
+            hospital_id=HOSPITAL_ID,
+            hospital_name="中国人民解放军医院301医院",
+            host_session_id="host-session-special-cnv-clarify",
+        )
+    )
+    host_context = HostContext(
+        user_id="demo-user",
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+        host_session_id="host-session-special-cnv-clarify",
+    )
+
+    response = conversation_agent.handle(
+        ChatRequest(
+            session_id=session.session_id,
+            message="4Mb到10Mb且高比例嵌合这类情况帮我汇总一下",
+            host_context=host_context,
+        ),
+        session,
+    )
+
+    assert response.structured_answer.answer_mode == "clarify"
+    assert response.clarify_payload is not None
+    assert "主指标" in response.clarify_payload.missing_parts

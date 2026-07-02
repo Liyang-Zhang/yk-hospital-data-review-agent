@@ -4,7 +4,7 @@ import re
 from datetime import date
 
 from yk_review_agent.models.chat import DataReadinessReport, SnapshotMetadata, SnapshotSourceSummary
-from yk_review_agent.services.metric_catalog import ACTIVE_DATA_CAPABILITIES, get_metric
+from yk_review_agent.services.metric_catalog import active_data_capabilities, get_metric
 from yk_review_agent.services.pgta_detail_dataset import get_pgta_dataset
 from yk_review_agent.services.product_snapshot_registry import get_snapshot_registry
 
@@ -73,7 +73,7 @@ class SnapshotService:
                 limitations=["当前问题未映射到受控指标契约。"],
             )
 
-        missing_fields = [field for field in metric.data_requirements if field not in ACTIVE_DATA_CAPABILITIES]
+        missing_fields = [field for field in metric.data_requirements if field not in active_data_capabilities("PGT-A")]
         if missing_fields:
             return DataReadinessReport(
                 status="unsupported",

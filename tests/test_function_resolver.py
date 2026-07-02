@@ -32,6 +32,24 @@ def test_special_cnv_has_priority_over_result_overview() -> None:
     assert resolution.metric_id == "pgta_special_cnv_overview"
 
 
+def test_oral_special_cnv_question_routes_to_special_cnv_overview() -> None:
+    resolution = function_resolver.resolve(
+        message="想看一下意外发现里面那些1Mb到4Mb综合征相关提示多不多",
+        parsed=_parsed(),
+    )
+
+    assert resolution.metric_id == "pgta_special_cnv_overview"
+
+
+def test_pseudoautosomal_question_routes_to_special_cnv_overview() -> None:
+    resolution = function_resolver.resolve(
+        message="拟常染色体区域缺失这块有多少个胚胎",
+        parsed=_parsed(),
+    )
+
+    assert resolution.metric_id == "pgta_special_cnv_overview"
+
+
 def test_multi_topic_question_returns_multiple_candidates() -> None:
     resolution = function_resolver.resolve(
         message="看一下送检量和整倍体率",
@@ -39,7 +57,7 @@ def test_multi_topic_question_returns_multiple_candidates() -> None:
     )
 
     assert resolution.metric_id is None
-    assert resolution.candidate_metric_ids == ["pgta_euploid_rate", "pgt_total_volume"]
+    assert resolution.candidate_metric_ids == ["pgt_total_volume", "pgta_euploid_rate"]
 
 
 def test_age_breakdown_routes_to_age_distribution() -> None:
@@ -49,3 +67,22 @@ def test_age_breakdown_routes_to_age_distribution() -> None:
     )
 
     assert resolution.metric_id == "pgta_age_distribution"
+
+
+def test_oral_volume_terms_route_to_total_volume() -> None:
+    resolution = function_resolver.resolve(
+        message="山西省妇幼保健院 2025年7月到2025年10月 35岁以上患者送检情况怎么样",
+        parsed=_parsed(),
+    )
+
+    assert resolution.metric_id == "pgt_total_volume"
+
+
+def test_multi_metric_oral_question_keeps_both_candidates() -> None:
+    resolution = function_resolver.resolve(
+        message="山西妇幼在25年7月到10月年龄大于35岁的患者送了多少周期，整倍体率如何",
+        parsed=_parsed(),
+    )
+
+    assert resolution.metric_id is None
+    assert resolution.candidate_metric_ids == ["pgt_total_volume", "pgta_euploid_rate"]

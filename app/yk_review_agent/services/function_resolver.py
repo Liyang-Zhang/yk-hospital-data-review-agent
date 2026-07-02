@@ -18,15 +18,20 @@ class FunctionResolver:
         candidates: list[str] = []
         text = message.lower()
         explicit_metric_id = parsed.metric_id if parsed.metric_id in SUPPORTED_METRIC_IDS else ""
+        first_match_indices: dict[str, int] = {}
 
         if explicit_metric_id:
             candidates.append(explicit_metric_id)
 
         for metric in ROUTABLE_METRICS:
-            if self._matches(metric=metric, message=text, parsed=parsed):
+            score = self._match_score(metric=metric, message=text, parsed=parsed)
+            if score > 0:
                 candidates.append(metric.metric_id)
+                first_match_indices[metric.metric_id] = self._first_match_index(message=text, metric=metric)
 
         deduped = list(dict.fromkeys(candidates))
+        deduped.sort(key=lambda metric_id: (first_match_indices.get(metric_id, 10**6), self._route_priority(metric_id)))
+        deduped = self._apply_metric_disambiguation(message=text, candidate_metric_ids=deduped)
         if len(deduped) == 1:
             return FunctionResolution(metric_id=deduped[0], candidate_metric_ids=deduped)
         if deduped:
@@ -41,27 +46,61 @@ class FunctionResolver:
             reason="当前问题还没有命中可执行的单指标主题。",
         )
 
-    def _matches(self, *, metric: MetricDefinition, message: str, parsed: ParsedIntent) -> bool:
+    def _match_score(self, *, metric: MetricDefinition, message: str, parsed: ParsedIntent) -> int:
+        score = 0
         if metric.metric_id == "pgta_age_distribution":
-            return parsed.breakdown == "age" or self._contains_any(message, metric.hard_terms)
+            if parsed.breakdown == "age":
+                score += 30
+            score += self._term_score(message, metric.hard_terms, hard=True)
+            return score
 
         if metric.metric_id == "pgta_cycle_indicator_overview":
-            return self._contains_any(message, metric.hard_terms)
+            return self._term_score(message, metric.hard_terms, hard=True)
 
         if metric.metric_id == "pgta_special_cnv_overview":
-            return self._contains_any(message, metric.hard_terms)
+            return self._term_score(message, metric.hard_terms, hard=True)
 
         if metric.metric_id == "pgta_euploid_rate":
             if parsed.breakdown == "age":
-                return False
+                return 0
             if self._contains_any(message, ("周期无整倍体", "周期整倍体率", "周期结局")):
-                return False
-            return self._contains_any(message, metric.hard_terms)
+                return 0
+            score += self._term_score(message, metric.hard_terms, hard=True)
+            score += self._term_score(message, metric.soft_terms, hard=False)
+            return score
 
-        return self._contains_any(message, metric.hard_terms)
+        score += self._term_score(message, metric.hard_terms, hard=True)
+        score += self._term_score(message, metric.soft_terms, hard=False)
+        return score
 
     def _contains_any(self, message: str, terms: tuple[str, ...]) -> bool:
         return any(term.lower() in message for term in terms)
+
+    def _term_score(self, message: str, terms: tuple[str, ...], *, hard: bool) -> int:
+        matches = [term for term in terms if term.lower() in message]
+        if not matches:
+            return 0
+        weight = 10 if hard else 3
+        return len(matches) * weight
+
+    def _first_match_index(self, *, message: str, metric: MetricDefinition) -> int:
+        terms = (*metric.hard_terms, *metric.soft_terms)
+        indices = [message.find(term.lower()) for term in terms if term and term.lower() in message]
+        return min(indices) if indices else 10**6
+
+    def _route_priority(self, metric_id: str) -> int:
+        for metric in ROUTABLE_METRICS:
+            if metric.metric_id == metric_id:
+                return metric.route_priority
+        return 10**6
+
+    def _apply_metric_disambiguation(self, *, message: str, candidate_metric_ids: list[str]) -> list[str]:
+        if {
+            "pgta_special_cnv_overview",
+            "pgta_mosaic_abnormal",
+        }.issubset(candidate_metric_ids) and self._contains_any(message, ("意外发现", "综合征", "拟常染色体", "p22.33")):
+            return [metric_id for metric_id in candidate_metric_ids if metric_id != "pgta_mosaic_abnormal"]
+        return candidate_metric_ids
 
 
 function_resolver = FunctionResolver()
