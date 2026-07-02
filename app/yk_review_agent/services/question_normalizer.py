@@ -26,45 +26,78 @@ class QuestionNormalizer:
 
     def normalize(self, message: str) -> NormalizedQuestion:
         normalized = message.strip()
+        normalized = self._compact_time_tokens(normalized)
         normalized = self._normalize_short_year(normalized)
         normalized = self._normalize_cross_month_range(normalized)
         normalized = self._normalize_age_expression(normalized)
+        normalized = self._compact_age_tokens(normalized)
         normalized = self._normalize_hospital_alias(normalized)
         normalized = re.sub(r"\s+", " ", normalized).strip()
         return NormalizedQuestion(raw_message=message, normalized_message=normalized)
+
+    def _compact_time_tokens(self, text: str) -> str:
+        normalized = text
+        normalized = re.sub(r"(\d)\s+年", r"\1年", normalized)
+        normalized = re.sub(r"年\s+(\d)", r"年\1", normalized)
+        normalized = re.sub(r"(\d)\s+月", r"\1月", normalized)
+        normalized = re.sub(r"月\s+(\d)", r"月\1", normalized)
+        normalized = re.sub(r"(\d)\s+[日号]", lambda m: m.group(0).replace(" ", ""), normalized)
+        normalized = re.sub(r"(\d)\s+季度", r"\1季度", normalized)
+        return normalized
 
     def _normalize_short_year(self, text: str) -> str:
         return re.sub(r"(?<!20)(?<!\d)([2-3]\d)年", lambda m: f"20{m.group(1)}年", text)
 
     def _normalize_cross_month_range(self, text: str) -> str:
-        def replace(match: re.Match[str]) -> str:
+        def replace_with_repeated_year(match: re.Match[str]) -> str:
             year = match.group("year")
             start_month = match.group("start")
             end_month = match.group("end")
             return f"{year}年{start_month}月到{year}年{end_month}月"
 
+        normalized = re.sub(
+            r"(?P<year>20\d{2})年(?P<start>[1-9]|1[0-2])月(?:到|至|-|~)\s*(?P<end>[1-9]|1[0-2])月",
+            replace_with_repeated_year,
+            text,
+        )
+
         return re.sub(
             r"(?P<year>20\d{2})年(?P<start>[1-9]|1[0-2])月(?:到|至|-|~)(?P<end>[1-9]|1[0-2])月",
-            replace,
-            text,
+            replace_with_repeated_year,
+            normalized,
         )
 
     def _normalize_age_expression(self, text: str) -> str:
         replacements: list[tuple[str, str]] = [
-            (r"年龄(?:大于|高于|超过)(\d{2})岁", r"年龄>\1岁"),
-            (r"(?:大于|高于|超过)(\d{2})岁", r">\1岁"),
-            (r"(\d{2})岁及以上", r">=\1岁"),
-            (r"(\d{2})岁以上", r">\1岁"),
-            (r"年龄(?:小于|低于)(\d{2})岁", r"年龄<\1岁"),
-            (r"(?:小于|低于)(\d{2})岁", r"<\1岁"),
-            (r"(\d{2})岁及以下", r"<=\1岁"),
-            (r"(\d{2})岁以下", r"<\1岁"),
-            (r"(\d{2})\s*-\s*(\d{2})岁", r"\1-\2岁"),
+            (r"年龄\s*(?:大于|高于|超过)\s*(\d{2})\s*岁", r"年龄>\1岁"),
+            (r"年龄\s*(?:大于|高于|超过)\s*(\d{2})", r"年龄>\1岁"),
+            (r"(?:大于|高于|超过)\s*(\d{2})\s*岁", r">\1岁"),
+            (r"(?:大于|高于|超过)\s*(\d{2})", r">\1岁"),
+            (r"(\d{2})\s*岁及以上", r">=\1岁"),
+            (r"(\d{2})\s*及以上", r">=\1岁"),
+            (r"(\d{2})\s*岁以上", r">\1岁"),
+            (r"(\d{2})\s*以上", r">\1岁"),
+            (r"年龄\s*(?:小于|低于)\s*(\d{2})\s*岁", r"年龄<\1岁"),
+            (r"年龄\s*(?:小于|低于)\s*(\d{2})", r"年龄<\1岁"),
+            (r"(?:小于|低于)\s*(\d{2})\s*岁", r"<\1岁"),
+            (r"(?:小于|低于)\s*(\d{2})", r"<\1岁"),
+            (r"(\d{2})\s*岁及以下", r"<=\1岁"),
+            (r"(\d{2})\s*及以下", r"<=\1岁"),
+            (r"(\d{2})\s*岁以下", r"<\1岁"),
+            (r"(\d{2})\s*以下", r"<\1岁"),
+            (r"(\d{2})\s*-\s*(\d{2})\s*岁", r"\1-\2岁"),
+            (r"(\d{2})\s*-\s*(\d{2})", r"\1-\2岁"),
             (r"未填写年龄|年龄未填写|年龄缺失", "未填写年龄"),
         ]
         normalized = text
         for pattern, replacement in replacements:
             normalized = re.sub(pattern, replacement, normalized)
+        return normalized
+
+    def _compact_age_tokens(self, text: str) -> str:
+        normalized = text
+        normalized = re.sub(r"([<>]=?)\s*(\d{2})\s*岁", r"\1\2岁", normalized)
+        normalized = re.sub(r"(\d{2})\s*-\s*(\d{2})\s*岁", r"\1-\2岁", normalized)
         return normalized
 
     def _normalize_hospital_alias(self, text: str) -> str:
@@ -93,6 +126,8 @@ class QuestionNormalizer:
             candidate_set.add(name.replace("保健院", ""))
             if "妇幼保健院" in name:
                 candidate_set.add(name.replace("妇幼保健院", "妇幼"))
+            if digit_match := re.search(r"(\d{3,})医院", name):
+                candidate_set.add(f"{digit_match.group(1)}医院")
             return {item.strip() for item in candidate_set if item and len(item.strip()) >= 3}
 
         hospital_names = self._hospital_names

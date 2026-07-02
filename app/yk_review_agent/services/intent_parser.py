@@ -11,6 +11,7 @@ from yk_review_agent.models.intent import ParsedIntent, SUPPORTED_METRIC_IDS
 from yk_review_agent.models.session import SessionContext
 from yk_review_agent.services.business_request_service import business_request_service
 from yk_review_agent.services.followup_resolver import follow_up_resolver
+from yk_review_agent.services.function_resolver import function_resolver
 from yk_review_agent.services.question_normalizer import question_normalizer
 
 
@@ -39,8 +40,10 @@ class IntentParserService:
     ) -> ParsedIntent:
         normalized = question_normalizer.normalize(message)
         fallback = self._rule_parse(message=normalized.normalized_message, context=context)
-        if self._llm_agent is None:
-            fallback = follow_up_resolver.resolve(message=normalized.normalized_message, parsed=fallback, context=context)
+        fallback = self._apply_rule_resolution(message=normalized.normalized_message, parsed=fallback)
+        fallback = follow_up_resolver.resolve(message=normalized.normalized_message, parsed=fallback, context=context)
+        fallback = self._apply_rule_resolution(message=normalized.normalized_message, parsed=fallback)
+        if self._llm_agent is None or self._should_skip_llm(fallback):
             return self._apply_defaults(
                 parsed=fallback,
                 fallback_time_range=fallback.time_range,
@@ -52,7 +55,6 @@ class IntentParserService:
         try:
             result = self._llm_agent.run_sync(
                 self._build_prompt(
-                    message=message,
                     normalized_message=normalized.normalized_message,
                     context=context,
                     hospital_id=hospital_id,
@@ -64,6 +66,7 @@ class IntentParserService:
             parsed = fallback
 
         parsed = follow_up_resolver.resolve(message=normalized.normalized_message, parsed=parsed, context=context)
+        parsed = self._apply_rule_resolution(message=normalized.normalized_message, parsed=parsed)
         return self._apply_defaults(
             parsed=parsed,
             fallback_time_range=fallback.time_range,
@@ -103,27 +106,28 @@ class IntentParserService:
     def _build_prompt(
         self,
         *,
-        message: str,
         normalized_message: str,
         context: SessionContext,
         hospital_id: str,
         hospital_name: str | None,
     ) -> str:
         current_time = context.time_range or "当前快照全部时间"
-        current_topic = context.current_topic or "无"
-        current_summary = context.last_result_summary or "无"
+        last_analysis = context.last_analysis
+        last_metric = last_analysis.metric_id if last_analysis else "无"
+        last_breakdown = last_analysis.breakdown if last_analysis else "无"
+        last_age_range = last_analysis.age_range if last_analysis and last_analysis.age_range else "无"
         return f"""
 当前医院：
 - hospital_id: {hospital_id}
 - hospital_name: {hospital_name or "未提供"}
 
 当前会话上下文：
-- current_topic: {current_topic}
 - current_time_range: {current_time}
-- last_result_summary: {current_summary}
+- last_metric_id: {last_metric}
+- last_breakdown: {last_breakdown}
+- last_age_range: {last_age_range}
 
 用户问题：
-原始：{message}
 规范化：{normalized_message}
 
 请输出结构化意图，不要输出解释性文字。
@@ -200,33 +204,56 @@ class IntentParserService:
             normalized_message=message,
         )
 
+    def _apply_rule_resolution(self, *, message: str, parsed: ParsedIntent) -> ParsedIntent:
+        resolution = function_resolver.resolve(message=message, parsed=parsed)
+        updated = parsed.model_copy(deep=True)
+        updated.candidate_metric_ids = resolution.candidate_metric_ids
+        if resolution.metric_id and resolution.metric_id in SUPPORTED_METRIC_IDS:
+            updated.metric_id = resolution.metric_id
+            updated.topic = self._topic_for(resolution.metric_id, updated.breakdown, updated.focus)
+        return updated
+
+    def _should_skip_llm(self, parsed: ParsedIntent) -> bool:
+        if parsed.request_kind == "structured_business_request":
+            return True
+        if parsed.follow_up_resolution.needs_clarification:
+            return True
+        if parsed.metric_id in SUPPORTED_METRIC_IDS:
+            return True
+        if len(parsed.candidate_metric_ids) > 1:
+            return True
+        if parsed.unsupported_reason:
+            return True
+        return False
+
     def _extract_time_range(self, message: str) -> str | None:
         if month_range := re.search(
-            r"(20\d{2})年([1-9]|1[0-2])月(?:到|至|-|~)(20\d{2})年([1-9]|1[0-2])月",
+            r"(20\d{2})\s*年\s*([1-9]|1[0-2])\s*月\s*(?:到|至|-|~)\s*(20\d{2})\s*年\s*([1-9]|1[0-2])\s*月",
             message,
         ):
-            return month_range.group(0)
-        if full_date := re.search(r"(20\d{2}年)?([1-9]|1[0-2])月([1-9]|[12]\d|3[01])[日号]", message):
+            return re.sub(r"\s+", "", month_range.group(0))
+        if full_date := re.search(r"(20\d{2}\s*年\s*)?([1-9]|1[0-2])\s*月\s*([1-9]|[12]\d|3[01])\s*[日号]", message):
             return full_date.group(0)
         if iso_date := re.search(r"(20\d{2})[-/](0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])", message):
             return iso_date.group(0)
-        if short_year_date := re.search(r"([2-3]\d)年([1-9]|1[0-2])月([1-9]|[12]\d|3[01])[日号]", message):
+        if short_year_date := re.search(r"([2-3]\d)\s*年\s*([1-9]|1[0-2])\s*月\s*([1-9]|[12]\d|3[01])\s*[日号]", message):
             return f"20{short_year_date.group(1)}年{short_year_date.group(2)}月{short_year_date.group(3)}日"
         if month_or_quarter := re.search(
-            r"(20\d{2}年)?([1-4]季度|Q[1-4]|[1-9]月|1[0-2]月)",
+            r"(20\d{2}\s*年\s*)?([1-4]\s*季度|Q[1-4]|[1-9]\s*月|1[0-2]\s*月)",
             message,
             re.IGNORECASE,
         ):
-            return month_or_quarter.group(0)
+            return re.sub(r"\s+", "", month_or_quarter.group(0))
         if short_year_month_or_quarter := re.search(
-            r"([2-3]\d)年([1-4]季度|Q[1-4]|[1-9]月|1[0-2]月)",
+            r"([2-3]\d)\s*年\s*([1-4]\s*季度|Q[1-4]|[1-9]\s*月|1[0-2]\s*月)",
             message,
             re.IGNORECASE,
         ):
-            return f"20{short_year_month_or_quarter.group(1)}年{short_year_month_or_quarter.group(2)}"
-        if year_only := re.search(r"(20\d{2})年", message):
+            value = re.sub(r"\s+", "", short_year_month_or_quarter.group(2))
+            return f"20{short_year_month_or_quarter.group(1)}年{value}"
+        if year_only := re.search(r"(20\d{2})\s*年", message):
             return year_only.group(0)
-        if short_year_only := re.search(r"([2-3]\d)年", message):
+        if short_year_only := re.search(r"([2-3]\d)\s*年", message):
             return f"20{short_year_only.group(1)}年"
         return None
 
@@ -274,19 +301,19 @@ class IntentParserService:
     def _extract_age_range(self, message: str) -> str | None:
         if "未填写年龄" in message:
             return "missing"
-        between = re.search(r"(\d{2})-(\d{2})岁", message)
+        between = re.search(r"(\d{2})\s*-\s*(\d{2})\s*岁", message)
         if between:
             return f"between:{between.group(1)},{between.group(2)}"
-        gte = re.search(r">=(\d{2})岁", message)
+        gte = re.search(r">=\s*(\d{2})\s*岁", message)
         if gte:
             return f"gte:{gte.group(1)}"
-        gt = re.search(r">(\d{2})岁", message)
+        gt = re.search(r">\s*(\d{2})\s*岁", message)
         if gt:
             return f"gt:{gt.group(1)}"
-        lte = re.search(r"<=(\d{2})岁", message)
+        lte = re.search(r"<=\s*(\d{2})\s*岁", message)
         if lte:
             return f"lte:{lte.group(1)}"
-        lt = re.search(r"<(\d{2})岁", message)
+        lt = re.search(r"<\s*(\d{2})\s*岁", message)
         if lt:
             return f"lt:{lt.group(1)}"
         return None

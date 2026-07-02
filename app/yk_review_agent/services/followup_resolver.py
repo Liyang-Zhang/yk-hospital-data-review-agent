@@ -42,7 +42,13 @@ class FollowUpResolver:
             )
             return updated
 
-        if not updated.has_explicit_age_range and context.last_analysis and context.last_analysis.age_range:
+        if (
+            not updated.has_explicit_age_range
+            and context.last_analysis
+            and context.last_analysis.age_range
+            and updated.breakdown != "age"
+            and updated.metric_id != "pgta_age_distribution"
+        ):
             if self._looks_like_follow_up(message_text):
                 updated.age_range = context.last_analysis.age_range
                 updated.has_explicit_age_range = True
