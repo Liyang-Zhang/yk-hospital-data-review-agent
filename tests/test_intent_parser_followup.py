@@ -164,7 +164,7 @@ def test_clear_single_metric_question_skips_llm_fallback(monkeypatch) -> None:
     assert parsed.age_range == "gt:35"
 
 
-def test_followup_switches_to_age_distribution_when_requested() -> None:
+def test_followup_switches_to_age_breakdown_when_requested() -> None:
     parsed = intent_parser_service.parse(
         message="换成年龄分层",
         context=SessionContext(
@@ -186,7 +186,8 @@ def test_followup_switches_to_age_distribution_when_requested() -> None:
         hospital_name="中国人民解放军医院301医院",
     )
 
-    assert parsed.metric_id == "pgta_age_distribution"
+    assert parsed.metric_id == "pgta_euploid_rate"
+    assert parsed.breakdown == "age"
     plan = answerability_policy.evaluate(
         message="换成年龄分层",
         parsed=parsed,
@@ -194,7 +195,7 @@ def test_followup_switches_to_age_distribution_when_requested() -> None:
         hospital_name="中国人民解放军医院301医院",
     )
     assert plan.answer_mode == "answer"
-    assert plan.metric_family == "pgta_age_distribution"
+    assert plan.metric_family == "pgta_euploid_rate"
     assert parsed.age_range is None
 
 
@@ -231,7 +232,7 @@ def test_followup_with_explicit_new_metric_does_not_inherit_old_metric() -> None
     assert plan.metric_family == "pgta_quality_overview"
 
 
-def test_followup_switch_to_age_distribution_does_not_inherit_previous_age_filter() -> None:
+def test_followup_switch_to_age_breakdown_does_not_inherit_previous_age_filter() -> None:
     parsed = intent_parser_service.parse(
         message="换成年龄分层",
         context=SessionContext(
@@ -254,7 +255,8 @@ def test_followup_switch_to_age_distribution_does_not_inherit_previous_age_filte
         hospital_name="中国人民解放军医院301医院",
     )
 
-    assert parsed.metric_id == "pgta_age_distribution"
+    assert parsed.metric_id == "pgta_euploid_rate"
+    assert parsed.breakdown == "age"
     assert parsed.age_range is None
 
 

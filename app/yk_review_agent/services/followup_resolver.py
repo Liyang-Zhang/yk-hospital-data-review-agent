@@ -47,7 +47,6 @@ class FollowUpResolver:
             and context.last_analysis
             and context.last_analysis.age_range
             and updated.breakdown != "age"
-            and updated.metric_id != "pgta_age_distribution"
         ):
             if self._looks_like_follow_up(message_text):
                 updated.age_range = context.last_analysis.age_range
@@ -59,7 +58,6 @@ class FollowUpResolver:
             not updated.metric_id
             and not updated.candidate_metric_ids
             and updated.breakdown != "overall"
-            and updated.breakdown != "age"
             and self._looks_like_follow_up(message_text)
         ):
             updated.metric_id = context.last_analysis.metric_id

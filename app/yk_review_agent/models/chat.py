@@ -62,6 +62,15 @@ class StructuredAnswer(BaseModel):
 
 
 class ClarifyPayload(BaseModel):
+    clarify_type: Literal[
+        "missing_metric",
+        "multiple_metrics",
+        "missing_filter",
+        "ambiguous_object",
+        "unsafe_followup",
+        "unsupported_combination",
+        "general"
+    ] = "general"
     title: str
     question: str
     missing_parts: list[str] = Field(default_factory=list)

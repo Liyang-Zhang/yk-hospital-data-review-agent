@@ -176,16 +176,25 @@ function RouteTracePanel({ response }: Props) {
   if (!trace) {
     return null;
   }
+  const statusClass =
+    trace.answer_mode === "answer"
+      ? "completed"
+      : trace.answer_mode === "clarify"
+        ? "clarify"
+        : "blocked";
 
   return (
     <section className="result-card result-card-trace">
-      <div className="result-card-label">开发调试路由 Trace</div>
+      <div className="result-card-head">
+        <div className="result-card-label">开发调试路由 Trace</div>
+        <div className={`task-status-pill task-status-${statusClass}`}>{trace.answer_mode}</div>
+      </div>
       <div className="readiness-detail">原始问题：{trace.raw_message}</div>
       <div className="readiness-detail">规范化：{trace.normalized_message}</div>
       <div className="readiness-detail">Filters：{Object.entries(trace.filters).map(([key, value]) => `${key}=${value}`).join("；") || "无"}</div>
       <div className="readiness-detail">候选函数：{trace.candidate_metric_ids.join("、") || "无"}</div>
       <div className="readiness-detail">最终函数：{trace.resolved_metric_id ?? "无"}</div>
-      <div className="readiness-detail">判定：{trace.answer_mode} / {trace.rationale}</div>
+      <div className={`trace-rationale trace-rationale-${statusClass}`}>{trace.rationale}</div>
     </section>
   );
 }

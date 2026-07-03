@@ -86,14 +86,35 @@ def test_qc_euploid_conflict_refuses() -> None:
 
 
 def test_age_rate_answers() -> None:
+    parsed = _parse("按年龄分层看整倍体率")
     plan = answerability_policy.evaluate(
         message="按年龄分层看整倍体率",
-        parsed=_parse("按年龄分层看整倍体率"),
+        parsed=parsed,
         hospital_id=HOSPITAL_ID,
         hospital_name="中国人民解放军医院301医院",
     )
+    assert parsed.breakdown == "age"
+    assert parsed.metric_id == "pgta_euploid_rate"
     assert plan.answer_mode == "answer"
-    assert plan.metric_family == "pgta_age_distribution"
+    assert plan.metric_family == "pgta_euploid_rate"
+
+
+def test_cycle_outcome_by_age_routes_to_cycle_metric_with_age_breakdown() -> None:
+    message = "按年龄分层，从周期维度去看下整体结局"
+    parsed = _parse(message)
+
+    plan = answerability_policy.evaluate(
+        message=message,
+        parsed=parsed,
+        hospital_id="山西省妇幼保健院",
+        hospital_name="山西省妇幼保健院",
+    )
+
+    assert parsed.breakdown == "age"
+    assert parsed.metric_id == "pgta_cycle_indicator_overview"
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgta_cycle_indicator_overview"
+    assert plan.candidate_metric_ids == ["pgta_cycle_indicator_overview"]
 
 
 def test_short_year_trend_maps_to_monthly_euploid_rate() -> None:
@@ -144,6 +165,23 @@ def test_oral_volume_aliases_route_to_total_volume() -> None:
     assert plan.metric_family == "pgt_total_volume"
 
 
+def test_quarterly_volume_trend_answers() -> None:
+    message = "按季度看一下 PGT-A 的送检趋势"
+    parsed = _parse(message)
+
+    plan = answerability_policy.evaluate(
+        message=message,
+        parsed=parsed,
+        hospital_id="山西省妇幼保健院",
+        hospital_name="山西省妇幼保健院",
+    )
+
+    assert parsed.breakdown == "quarter"
+    assert parsed.focus == "trend"
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgt_total_volume"
+
+
 def test_oral_between_age_filter_routes_to_euploid_rate() -> None:
     message = "35 到 37 岁这批患者的PGT-A整倍体率怎么样"
     parsed = _parse(message)
@@ -175,6 +213,52 @@ def test_oral_gte_age_filter_routes_to_euploid_rate() -> None:
     assert parsed.age_range == "gte:41"
     assert plan.answer_mode == "answer"
     assert plan.metric_family == "pgta_euploid_rate"
+
+
+def test_cycle_angle_question_routes_to_cycle_indicator_overview() -> None:
+    message = "从周期角度分析无整倍体胚胎率"
+    parsed = _parse(message)
+
+    plan = answerability_policy.evaluate(
+        message=message,
+        parsed=parsed,
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+    )
+
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgta_cycle_indicator_overview"
+
+
+def test_explicit_cycle_outcome_question_does_not_clarify() -> None:
+    message = "看一下 PGT-A 的周期整倍体结局"
+    parsed = _parse(message)
+
+    plan = answerability_policy.evaluate(
+        message=message,
+        parsed=parsed,
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+    )
+
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgta_cycle_indicator_overview"
+
+
+def test_ambiguous_euploid_object_clarifies() -> None:
+    message = "看一下无整倍体率"
+    parsed = _parse(message)
+
+    plan = answerability_policy.evaluate(
+        message=message,
+        parsed=parsed,
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+    )
+
+    assert plan.answer_mode == "clarify"
+    assert plan.clarify_missing == ["统计对象"]
+    assert plan.candidate_metric_ids == ["pgta_euploid_rate", "pgta_cycle_indicator_overview"]
 
 
 def test_missing_age_generic_result_question_clarifies_without_candidates() -> None:

@@ -47,7 +47,7 @@ class QueryService:
         if metric_id == "pgta_euploid_rate":
             return self._pgta_euploid_rate(records, filters, breakdown)
         if metric_id == "pgta_age_distribution":
-            return self._pgta_age_distribution(records, filters)
+            return self._pgta_euploid_rate(records, filters, "age")
         if metric_id == "pgta_quality_overview":
             return self._pgta_quality_overview(records, filters, breakdown)
         if metric_id == "pgta_mosaic_abnormal":
@@ -170,7 +170,7 @@ class QueryService:
                 chart_values.append(round(rate, 1))
 
         return {
-            "metric_id": "pgta_age_distribution",
+            "metric_id": "pgta_euploid_rate",
             "filters": filters,
             "summary": "已按女方年龄对当前 PGT-A 快照做分层，可用于观察不同年龄段的周期量和整倍体率差异。",
             "evidence": {
@@ -365,7 +365,7 @@ class QueryService:
         }
 
     def _pgta_cycle_indicator_overview(self, records: list[DetailRecord], filters: dict[str, str], breakdown: str) -> dict:
-        grouped = _group_records(records, breakdown if breakdown in {"month", "quarter"} else "overall")
+        grouped = _group_records(records, breakdown if breakdown in {"month", "quarter", "age"} else "overall")
         rows = []
         chart_categories: list[str] = []
         chart_values: list[float] = []
@@ -539,6 +539,8 @@ def _bucket_key(item: DetailRecord, breakdown: str) -> str:
     if breakdown == "month":
         year, month = _month_bucket_parts(item)
         return f"{year}-{month:02d}"
+    if breakdown == "age":
+        return item.age_label or "未填写"
     return "总体"
 
 

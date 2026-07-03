@@ -18,7 +18,6 @@ from yk_review_agent.services.question_normalizer import question_normalizer
 SUPPORTED_METRICS_TEXT = """
 - pgt_total_volume: 送检量、周期数、胚胎数、平均每周期胚胎数
 - pgta_euploid_rate: 整倍体率、按月/季度/日期看整倍体率
-- pgta_age_distribution: 年龄分层整倍体率、不同年龄段周期数和胚胎数
 - pgta_quality_overview: 质控情况、检测周期数、检测胚胎数、平均囊胚数、检测成功率、PASS/INFO/FAIL、NA
 - pgta_mosaic_abnormal: 嵌合、异常结构、异常率、异倍体率、意外发现率
 - pgta_cycle_indicator_overview: 周期无整倍体率、周期整倍体率、仅1个整倍体、>=2个整倍体
@@ -343,7 +342,6 @@ class IntentParserService:
         mapping = {
             "pgt_total_volume": "PGT-A 送检量",
             "pgta_euploid_rate": "PGT-A 整倍体率",
-            "pgta_age_distribution": "PGT-A 年龄分层整倍体率",
             "pgta_quality_overview": "PGT-A 检测与质控总览",
             "pgta_mosaic_abnormal": "PGT-A 嵌合与异常结构",
             "pgta_cycle_indicator_overview": "PGT-A 周期结局总览",

@@ -1,9 +1,13 @@
+import pytest
+
 from yk_review_agent.models.chat import ChatRequest, HostContext
 from yk_review_agent.models.session import SessionCreateRequest
 from yk_review_agent.services.agent import conversation_agent
 from yk_review_agent.services.session_store import session_store
 
 HOSPITAL_ID = "中国人民解放军医院301医院"
+
+pytestmark = [pytest.mark.agent, pytest.mark.integration, pytest.mark.slow]
 
 
 def test_structured_business_request_returns_task_and_capability_report() -> None:
@@ -92,6 +96,7 @@ def test_clarify_response_returns_clarify_payload() -> None:
 
     assert response.structured_answer.answer_mode == "clarify"
     assert response.clarify_payload is not None
+    assert response.clarify_payload.clarify_type == "missing_metric"
     assert "主指标" in response.clarify_payload.missing_parts
 
 
@@ -241,4 +246,36 @@ def test_special_cnv_ambiguous_question_clarifies() -> None:
 
     assert response.structured_answer.answer_mode == "clarify"
     assert response.clarify_payload is not None
+    assert response.clarify_payload.clarify_type == "multiple_metrics"
     assert "主指标" in response.clarify_payload.missing_parts
+
+
+def test_ambiguous_euploid_object_returns_object_clarify_payload() -> None:
+    session = session_store.create_session(
+        SessionCreateRequest(
+            user_id="demo-user",
+            hospital_id=HOSPITAL_ID,
+            hospital_name="中国人民解放军医院301医院",
+            host_session_id="host-session-object-clarify",
+        )
+    )
+    host_context = HostContext(
+        user_id="demo-user",
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+        host_session_id="host-session-object-clarify",
+    )
+
+    response = conversation_agent.handle(
+        ChatRequest(
+            session_id=session.session_id,
+            message="看一下无整倍体率",
+            host_context=host_context,
+        ),
+        session,
+    )
+
+    assert response.structured_answer.answer_mode == "clarify"
+    assert response.clarify_payload is not None
+    assert response.clarify_payload.clarify_type == "ambiguous_object"
+    assert "统计对象" in response.clarify_payload.missing_parts

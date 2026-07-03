@@ -6,7 +6,6 @@ from yk_review_agent.models.business_request import RequestedBusinessMetric
 SUPPORTED_METRIC_IDS = {
     "pgt_total_volume",
     "pgta_euploid_rate",
-    "pgta_age_distribution",
     "pgta_quality_overview",
     "pgta_mosaic_abnormal",
     "pgta_cycle_indicator_overview",
@@ -30,7 +29,7 @@ class ParsedIntent(BaseModel):
     topic: str = Field(description="当前问题归一化后的主题名称。")
     metric_id: str = Field(
         default="",
-        description="受控指标ID。仅允许 pgt_total_volume, pgta_euploid_rate, pgta_age_distribution, pgta_quality_overview, pgta_mosaic_abnormal, pgta_cycle_indicator_overview, pgta_special_cnv_overview。",
+        description="受控指标ID。仅允许 pgt_total_volume, pgta_euploid_rate, pgta_quality_overview, pgta_mosaic_abnormal, pgta_cycle_indicator_overview, pgta_special_cnv_overview。",
     )
     time_range: str = Field(
         default="当前快照全部时间",

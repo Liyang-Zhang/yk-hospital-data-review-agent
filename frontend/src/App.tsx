@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 
+import { ClarifyCard } from "./components/ClarifyCard";
 import { ResultCards } from "./components/ResultCards";
+import { UserResultCards } from "./components/UserResultCards";
 import {
   createSession,
   fetchDemoMetadata,
@@ -16,54 +18,59 @@ type ChatTurn = {
   response?: ChatResponse;
 };
 
+type ViewMode = "user" | "debug";
+
 const promptGroups = [
   {
-    title: "总量类",
+    title: "看规模和趋势",
+    description: "适合做月度、季度经营回顾",
     prompts: [
-      "看一下当前快照下的 PGT-A 送检量",
-      "山西省妇幼保健院 2025年7月到2025年10月 >35岁患者的送检量",
-      "2025年 PGT-A 一共送了多少周期和胚胎",
+      "按季度看一下 2025 年 PGT-A 送检趋势",
+      "看一下 2025 年 7 月到 10 月 PGT-A 送检量",
+      "2025 年 PGT-A 每月整倍体率变化怎么样",
     ],
   },
   {
-    title: "率类与趋势类",
+    title: "看结果和质量",
+    description: "适合查看结果结构、质控和特殊提示",
     prompts: [
-      "按月看一下 PGT-A 整倍体率变化",
-      "2025年 PGT-A 的整倍体率是多少",
-      "2025年7月 PGT-A 的整倍体率是多少",
-      "按季度看一下 PGT-A 整倍体率趋势",
+      "看一下 2025 年 PGT-A 质控情况",
+      "看一下 PGT-A 结果分布和异常结构",
+      "特殊 CNV 提示这块有多少",
     ],
   },
   {
-    title: "年龄筛选类",
+    title: "看人群和周期",
+    description: "适合按年龄或周期层面拆开看",
     prompts: [
-      "按年龄分层看一下 PGT-A 的整倍体率",
-      "35-37岁患者的 PGT-A 质控情况",
-      "未填写年龄患者的 PGT-A 结果分布",
-    ],
-  },
-  {
-    title: "结果结构类",
-    prompts: [
-      "看一下 PGT-A 的结果分布",
-      "看一下 PGT-A 的嵌合率、异常率和意外发现率",
-      "看一下 PGT-A 的特殊 CNV 提示情况",
-    ],
-  },
-  {
-    title: "周期结局类",
-    prompts: [
+      "按年龄分层看一下 PGT-A 整倍体率",
+      "按年龄分层，从周期维度看整体结局",
       "看一下 PGT-A 的周期无整倍体率",
-      "看一下 PGT-A 的周期整倍体结局",
     ],
   },
 ];
 
+const workflowHints = [
+  {
+    title: "可回答的问题",
+    items: ["送检量", "胚胎整倍体率", "年龄分层", "质控", "结果结构", "周期结局", "特殊 CNV"],
+  },
+  {
+    title: "可以使用的条件",
+    items: ["医院", "时间范围", "年龄范围"],
+  },
+  {
+    title: "当前不支持",
+    items: ["PGT-SR / PGT-M / PGT-AH 真实执行", "全产品汇总", "复杂多指标联合执行", "临床指征类统计"],
+  },
+];
+
 export function App() {
+  const [viewMode, setViewMode] = useState<ViewMode>("user");
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [metadata, setMetadata] = useState<DemoMetadata | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
-  const [input, setInput] = useState(promptGroups[0].prompts[0]);
+  const [input, setInput] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messageColumnRef = useRef<HTMLDivElement | null>(null);
@@ -126,6 +133,23 @@ export function App() {
     event.preventDefault();
     if (!input.trim()) return;
     await submitPrompt(input.trim());
+  }
+
+  if (viewMode === "user") {
+    return (
+      <UserWorkspace
+        error={error}
+        input={input}
+        isSubmitting={isSubmitting}
+        metadata={metadata}
+        onInputChange={setInput}
+        onModeChange={setViewMode}
+        onSubmit={onSubmit}
+        session={session}
+        submitPrompt={submitPrompt}
+        turns={turns}
+      />
+    );
   }
 
   return (
@@ -215,7 +239,28 @@ export function App() {
         ) : null}
 
         <section className="sidebar-panel">
-          <div className="panel-title">推荐问题</div>
+          <div className="panel-title">问法引导</div>
+          <div className="workflow-copy">
+            先明确主指标，再补时间或年龄条件，系统会更稳定地进入受控统计分析。
+          </div>
+          <div className="workflow-grid">
+            {workflowHints.map((group) => (
+              <div className="workflow-block" key={group.title}>
+                <div className="workflow-block-title">{group.title}</div>
+                <div className="workflow-tag-list">
+                  {group.items.map((item) => (
+                    <span className={`workflow-tag${group.title === "当前不支持" ? " workflow-tag-warning" : ""}`} key={item}>
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="sidebar-panel">
+          <div className="panel-title">推荐问法</div>
           {promptGroups.map((group) => (
             <div className="prompt-group" key={group.title}>
               <div className="prompt-group-title">{group.title}</div>
@@ -243,8 +288,13 @@ export function App() {
             <div className="workspace-kicker">EMBEDDED CHAT WORKSPACE</div>
             <h1>面向医院客户的 PGT 回顾分析助手</h1>
           </div>
-          <div className="status-pill">
-            {session ? `会话已连接 · ${session.hospital_name ?? session.hospital_id}` : "等待会话初始化"}
+          <div className="debug-header-actions">
+            <button className="mode-switch-button" onClick={() => setViewMode("user")} type="button">
+              用户工作台
+            </button>
+            <div className="status-pill">
+              {session ? `会话已连接 · ${session.hospital_name ?? session.hospital_id}` : "等待会话初始化"}
+            </div>
           </div>
         </header>
 
@@ -287,30 +337,12 @@ export function App() {
                     );
                   })()}
                   {turn.response?.clarify_payload ? (
-                    <div className="clarify-panel">
-                      <div className="clarify-title">{turn.response.clarify_payload.title}</div>
-                      <div className="clarify-question">{turn.response.clarify_payload.question}</div>
-                      {turn.response.clarify_payload.missing_parts.length ? (
-                        <div className="clarify-missing">
-                          当前缺失：{turn.response.clarify_payload.missing_parts.join("、")}
-                        </div>
-                      ) : null}
-                      {turn.response.clarify_payload.options.length ? (
-                        <div className="clarify-options">
-                          {turn.response.clarify_payload.options.map((item) => (
-                            <button
-                              className="followup-chip"
-                              disabled={isSubmitting || !session}
-                              key={item}
-                              onClick={() => void submitPrompt(item)}
-                              type="button"
-                            >
-                              {item}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
+                    <ClarifyCard
+                      payload={turn.response.clarify_payload}
+                      isSubmitting={isSubmitting}
+                      onSelectOption={(item) => void submitPrompt(item)}
+                      sessionReady={Boolean(session)}
+                    />
                   ) : null}
                   {turn.response ? <ResultCards response={turn.response} /> : null}
                   {turn.response?.follow_up_suggestions?.length ? (
@@ -357,6 +389,249 @@ export function App() {
               {error ? <div className="error-banner">{error}</div> : null}
             </div>
           </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+type WorkspaceProps = {
+  error: string | null;
+  input: string;
+  isSubmitting: boolean;
+  metadata: DemoMetadata | null;
+  onInputChange: (value: string) => void;
+  onModeChange: (mode: ViewMode) => void;
+  onSubmit: (event: FormEvent) => Promise<void>;
+  session: SessionRecord | null;
+  submitPrompt: (prompt: string) => Promise<void>;
+  turns: ChatTurn[];
+};
+
+function UserWorkspace({
+  error,
+  input,
+  isSubmitting,
+  metadata,
+  onInputChange,
+  onModeChange,
+  onSubmit,
+  session,
+  submitPrompt,
+  turns,
+}: WorkspaceProps) {
+  const hospitalName = metadata?.default_hospital?.hospital_name ?? session?.hospital_name ?? "当前医院";
+  const snapshotRange =
+    metadata ? `${metadata.snapshot_start.slice(0, 10)} 至 ${metadata.snapshot_end.slice(0, 10)}` : "等待快照信息";
+  const latestAssistant = [...turns].reverse().find((turn) => turn.role === "assistant" && turn.response);
+  const sessionReady = Boolean(session);
+
+  return (
+    <div className="user-shell">
+      <header className="user-topbar">
+        <div className="user-brand">
+          <div className="user-brand-mark">YK</div>
+          <div>
+            <div className="user-brand-title">PGT 数据回顾助手</div>
+            <div className="user-brand-subtitle">{hospitalName}</div>
+          </div>
+        </div>
+        <div className="user-topbar-actions">
+          <div className="user-session-pill">{session ? "会话已连接" : "连接中"}</div>
+          <button className="mode-switch-button" onClick={() => onModeChange("debug")} type="button">
+            研发调试
+          </button>
+        </div>
+      </header>
+
+      <main className="user-main">
+        <section className="user-command-panel">
+          <div className="user-context-row">
+            <div>
+              <div className="user-kicker">当前医院</div>
+              <h1>{hospitalName} PGT-A 数据回顾</h1>
+            </div>
+          </div>
+
+          <form className="user-composer" onSubmit={onSubmit}>
+            <textarea
+              value={input}
+              onChange={(event) => onInputChange(event.target.value)}
+              placeholder="直接输入你想回顾的问题，例如：2025 年 PGT-A 的整倍体率怎么样？"
+              rows={4}
+            />
+            <div className="user-composer-footer">
+              <div className="user-composer-hint">支持连续追问，会沿用当前医院和可继承的筛选条件。</div>
+              <button className="user-submit-button" disabled={isSubmitting || !sessionReady} type="submit">
+                {isSubmitting ? "分析中..." : "开始分析"}
+              </button>
+            </div>
+          </form>
+
+          <div className="user-prompt-lanes">
+            {promptGroups.map((group) => (
+              <div className="user-prompt-lane" key={group.title}>
+                <div className="user-lane-title">{group.title}</div>
+                <p className="user-lane-copy">{group.description}</p>
+                <div className="user-prompt-list">
+                  {group.prompts.map((prompt) => (
+                    <button
+                      className="user-prompt-chip"
+                      disabled={isSubmitting || !sessionReady}
+                      key={prompt}
+                      onClick={() => void submitPrompt(prompt)}
+                      type="button"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="user-object-choices">
+            <div className="user-lane-title">整倍体指标怎么选</div>
+            <div className="user-object-choice-list">
+              <button
+                className="user-object-choice"
+                disabled={isSubmitting || !sessionReady}
+                onClick={() => void submitPrompt("看一下 PGT-A 的胚胎整倍体率")}
+                type="button"
+              >
+                <span className="user-object-choice-kicker">输出胚胎数和比例</span>
+                <strong>胚胎整倍体率</strong>
+                <span>适合判断检测胚胎中未见异常的占比。</span>
+              </button>
+              <button
+                className="user-object-choice"
+                disabled={isSubmitting || !sessionReady}
+                onClick={() => void submitPrompt("看一下 PGT-A 的周期整倍体结局")}
+                type="button"
+              >
+                <span className="user-object-choice-kicker">输出周期结局分布</span>
+                <strong>周期整倍体结局</strong>
+                <span>适合判断每个周期是否有可用整倍体胚胎。</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <aside className="user-capability-panel">
+          <div className="user-panel-section user-panel-section-primary">
+            <div className="user-panel-title">当前数据</div>
+            <div className="user-scope-list">
+              <div>
+                <span>医院</span>
+                <strong>{hospitalName}</strong>
+              </div>
+              <div>
+                <span>数据时间</span>
+                <strong>{snapshotRange}</strong>
+              </div>
+              <div>
+                <span>当前可分析</span>
+                <strong>PGT-A</strong>
+              </div>
+            </div>
+          </div>
+
+          <div className="user-panel-divider" />
+
+          <div className="user-panel-section">
+            <div className="user-panel-title">能问什么</div>
+            <ul className="user-capability-list">
+              {workflowHints[0].items.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="user-panel-section">
+            <div className="user-panel-title">可以怎么限定</div>
+            <ul className="user-capability-list user-capability-list-soft">
+              {workflowHints[1].items.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        </aside>
+
+        <section className="user-answer-panel">
+          {turns.length === 0 ? (
+            <div className="user-empty-answer">
+              <div className="user-empty-title">先问一个单指标问题</div>
+              <p>例如送检量、整倍体率、质控情况、结果分布。问题不够明确时，我会给出补参选项。</p>
+            </div>
+          ) : null}
+
+          <div className="user-thread">
+            {turns.map((turn, index) => (
+              <article className={`user-turn user-turn-${turn.role}`} key={`${turn.role}-${index}`}>
+                <div className="user-turn-label">{turn.role === "user" ? "你的问题" : "分析结果"}</div>
+                <div className="user-turn-text">{turn.text}</div>
+                {turn.response?.structured_answer.answer_mode !== "answer" && turn.response?.structured_answer.rationale ? (
+                  <div className={`user-state user-state-${turn.response.structured_answer.answer_mode}`}>
+                    {turn.response.structured_answer.rationale}
+                  </div>
+                ) : null}
+                {turn.response?.clarify_payload ? (
+                  <ClarifyCard
+                    payload={turn.response.clarify_payload}
+                    isSubmitting={isSubmitting}
+                    onSelectOption={(item) => void submitPrompt(item)}
+                    sessionReady={sessionReady}
+                  />
+                ) : null}
+                {turn.response ? <UserResultCards response={turn.response} /> : null}
+              </article>
+            ))}
+          </div>
+
+          {latestAssistant?.response?.follow_up_suggestions.length ? (
+            <div className="user-followup-bar">
+              <div className="user-followup-head">
+                <div className="user-panel-title">继续追问</div>
+              </div>
+              <div className="user-followup-chip-list">
+                {latestAssistant.response.follow_up_suggestions.map((item) => (
+                  <button
+                    className="user-followup-chip"
+                    disabled={isSubmitting || !sessionReady}
+                    key={item}
+                    onClick={() => void submitPrompt(item)}
+                    type="button"
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+              <form
+                className="user-followup-composer"
+                onSubmit={(event) => {
+                  void onSubmit(event);
+                }}
+              >
+                <input
+                  className="user-followup-input"
+                  disabled={!sessionReady}
+                  onChange={(event) => onInputChange(event.target.value)}
+                  placeholder="继续输入你的问题"
+                  type="text"
+                  value={input}
+                />
+                <button
+                  className="user-followup-submit"
+                  disabled={isSubmitting || !sessionReady || !input.trim()}
+                  type="submit"
+                >
+                  {isSubmitting ? "发送中..." : "发送"}
+                </button>
+              </form>
+            </div>
+          ) : null}
+
+          {error ? <div className="error-banner">{error}</div> : null}
         </section>
       </main>
     </div>

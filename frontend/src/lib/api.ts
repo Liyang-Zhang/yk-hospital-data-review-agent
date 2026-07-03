@@ -45,6 +45,14 @@ export type ChatResponse = {
   result_cards: ResultCard[];
   follow_up_suggestions: string[];
   clarify_payload?: {
+    clarify_type?:
+      | "missing_metric"
+      | "multiple_metrics"
+      | "missing_filter"
+      | "ambiguous_object"
+      | "unsafe_followup"
+      | "unsupported_combination"
+      | "general";
     title: string;
     question: string;
     missing_parts: string[];
@@ -220,6 +228,14 @@ function isChatResponse(value: unknown): value is ChatResponse {
   if (value.clarify_payload !== undefined && value.clarify_payload !== null) {
     if (
       !isObject(value.clarify_payload) ||
+      (value.clarify_payload.clarify_type !== undefined &&
+        value.clarify_payload.clarify_type !== "missing_metric" &&
+        value.clarify_payload.clarify_type !== "multiple_metrics" &&
+        value.clarify_payload.clarify_type !== "missing_filter" &&
+        value.clarify_payload.clarify_type !== "ambiguous_object" &&
+        value.clarify_payload.clarify_type !== "unsafe_followup" &&
+        value.clarify_payload.clarify_type !== "unsupported_combination" &&
+        value.clarify_payload.clarify_type !== "general") ||
       typeof value.clarify_payload.title !== "string" ||
       typeof value.clarify_payload.question !== "string" ||
       !Array.isArray(value.clarify_payload.missing_parts) ||

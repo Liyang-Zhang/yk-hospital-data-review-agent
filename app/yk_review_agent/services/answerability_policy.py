@@ -16,6 +16,11 @@ from yk_review_agent.services.metric_catalog import (
 )
 from yk_review_agent.services.pgta_detail_dataset import get_pgta_dataset
 
+AMBIGUOUS_EUPLOID_OBJECT_TERMS = (
+    "无整倍体率",
+    "整倍体结局",
+)
+
 
 class AnswerabilityPolicy:
     def evaluate(
@@ -136,6 +141,15 @@ class AnswerabilityPolicy:
                 suggestions=REFUSE_SUGGESTIONS,
                 normalized_message=parsed.normalized_message,
             )
+
+        if object_clarify_plan := self._clarify_ambiguous_euploid_object(
+            message=message,
+            parsed=parsed,
+            filters=filters,
+            time_grain=time_grain,
+            candidate_ids=resolution.candidate_metric_ids,
+        ):
+            return object_clarify_plan
 
         candidate_ids = resolution.candidate_metric_ids
 
@@ -358,6 +372,53 @@ class AnswerabilityPolicy:
             return "当前第一版暂不支持临床指征相关统计，因为这些字段口径还未完全确认。"
         return None
 
+    def _clarify_ambiguous_euploid_object(
+        self,
+        *,
+        message: str,
+        parsed: ParsedIntent,
+        filters: dict[str, str],
+        time_grain: str,
+        candidate_ids: list[str],
+    ) -> AnalysisPlan | None:
+        compact_message = "".join(message.split())
+        has_cycle_signal = any(
+            term in compact_message
+            for term in ("周期无整倍体", "周期整倍体率", "周期整倍体结局", "周期结局", "周期层面", "从周期角度", "按周期看", "每周期")
+        )
+        has_embryo_signal = any(
+            term in compact_message for term in ("胚胎整倍体率", "胚胎层面", "从胚胎角度", "按胚胎看", "每枚胚胎")
+        )
+        has_ambiguous_euploid_term = any(term in compact_message for term in AMBIGUOUS_EUPLOID_OBJECT_TERMS)
+
+        if has_cycle_signal or has_embryo_signal or not has_ambiguous_euploid_term:
+            return None
+
+        object_metric_ids = {"pgta_euploid_rate", "pgta_cycle_indicator_overview"}
+        if parsed.metric_id not in object_metric_ids and not set(candidate_ids).intersection(object_metric_ids):
+            return None
+
+        if candidate_ids and not set(candidate_ids).issubset(object_metric_ids):
+            return None
+
+        return AnalysisPlan(
+            product_scope="PGT-A",
+            breakdown=parsed.breakdown,
+            time_grain=time_grain,
+            filters=filters,
+            answer_mode="clarify",
+            rationale="当前问题已经进入整倍体相关主题，但还缺少“胚胎层面”还是“周期层面”的关键信息。",
+            clarification_question="这次你想看胚胎层面的整倍体率，还是周期层面的整倍体结局？",
+            clarify_missing=["统计对象"],
+            suggestions=[
+                "看一下 PGT-A 的胚胎整倍体率",
+                "看一下 PGT-A 的周期无整倍体率",
+                "看一下 PGT-A 的周期整倍体结局",
+            ],
+            candidate_metric_ids=["pgta_euploid_rate", "pgta_cycle_indicator_overview"],
+            normalized_message=parsed.normalized_message,
+        )
+
     def _detect_conflict(self, message: str) -> str | None:
         has_quality = "质控" in message or any(term in message.lower() for term in ("pass", "fail", "info"))
         has_euploid = "整倍体率" in message or "整倍体" in message
@@ -419,11 +480,6 @@ class AnswerabilityPolicy:
                 "按年龄分层看一下 PGT-A 整倍体率",
                 "再看一下 PGT-A 的质控情况",
                 "补充 PGT-A 的结果分布",
-            ],
-            "pgta_age_distribution": [
-                "补充 PGT-A 的整倍体率",
-                "再看一下 PGT-A 的质控情况",
-                "看一下当前快照下的 PGT-A 送检量",
             ],
             "pgta_mosaic_abnormal": [
                 "看一下 PGT-A 的周期整倍体结局",

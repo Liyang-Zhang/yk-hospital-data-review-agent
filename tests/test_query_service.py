@@ -1,5 +1,7 @@
 from datetime import datetime
 
+import pytest
+
 from yk_review_agent.services.pgta_detail_dataset import DetailRecord, get_pgta_dataset
 from yk_review_agent.services.query_service import (
     _is_incidental_mosaic_cnv,
@@ -13,6 +15,8 @@ BASE_FILTERS = {
     "hospital_id": "中国人民解放军医院301医院",
     "hospital_name": "中国人民解放军医院301医院",
 }
+
+pytestmark = pytest.mark.integration
 
 
 def test_month_breakdown_returns_expected_shape() -> None:
@@ -63,6 +67,27 @@ def test_cycle_indicator_overview_uses_month_rows() -> None:
     assert result["table"]["title"] == "PGT-A 周期结局总览"
     assert result["table"]["rows"]
     assert str(result["table"]["rows"][0][0]).startswith("2025-")
+
+
+def test_cycle_indicator_overview_supports_age_breakdown() -> None:
+    result = query_service.run(
+        "pgta_cycle_indicator_overview",
+        {**BASE_FILTERS, "time_range": "2025年", "breakdown": "age", "focus": "distribution"},
+    )
+
+    assert result["metric_id"] == "pgta_cycle_indicator_overview"
+    assert result["table"]["columns"][0] == "年龄段"
+    assert result["table"]["rows"]
+
+
+def test_legacy_age_distribution_metric_aliases_to_euploid_age_breakdown() -> None:
+    result = query_service.run(
+        "pgta_age_distribution",
+        {**BASE_FILTERS, "time_range": "2025年", "breakdown": "age", "focus": "distribution"},
+    )
+
+    assert result["metric_id"] == "pgta_euploid_rate"
+    assert result["table"]["title"] == "PGT-A 年龄分层整倍体率"
 
 
 def test_special_cnv_overview_returns_expected_columns() -> None:

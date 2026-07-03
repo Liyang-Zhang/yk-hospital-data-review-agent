@@ -22,6 +22,8 @@ BASE_FILTERS = {
     "hospital_name": HOSPITAL_ID,
 }
 
+pytestmark = [pytest.mark.oracle, pytest.mark.integration, pytest.mark.slow]
+
 
 @pytest.fixture()
 def use_pgta_oracle_snapshot() -> None:
@@ -97,9 +99,9 @@ def test_pgta_euploid_rate_matches_oracle_for_35_to_37_bucket(use_pgta_oracle_sn
     assert result["table"]["rows"] == [["总体", 345, 179, "51.9%"]]
 
 
-def test_pgta_age_distribution_matches_oracle(use_pgta_oracle_snapshot: None) -> None:
+def test_pgta_euploid_rate_age_breakdown_matches_oracle(use_pgta_oracle_snapshot: None) -> None:
     result = query_service.run(
-        "pgta_age_distribution",
+        "pgta_euploid_rate",
         {**BASE_FILTERS, "time_range": "2025年", "breakdown": "age", "focus": "distribution"},
     )
     assert result["table"]["rows"] == [

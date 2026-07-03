@@ -193,7 +193,15 @@ class ConversationAgent:
         options = list(plan.suggestions)
         if "年龄范围" in plan.clarify_missing:
             options.extend(["<35岁", "35-37岁", ">35岁", "41岁及以上", "未填写年龄"])
+        clarify_type = "general"
+        if "主指标" in plan.clarify_missing or "指标集合" in plan.clarify_missing:
+            clarify_type = "multiple_metrics" if len(plan.candidate_metric_ids) > 1 else "missing_metric"
+        elif "统计对象" in plan.clarify_missing:
+            clarify_type = "ambiguous_object"
+        elif any(item in plan.clarify_missing for item in ("时间范围", "年龄范围", "产品范围")):
+            clarify_type = "missing_filter"
         return ClarifyPayload(
+            clarify_type=clarify_type,
             title="请补充关键信息",
             question=plan.clarification_question,
             missing_parts=plan.clarify_missing,
@@ -307,12 +315,6 @@ class ConversationAgent:
                 "按年龄分层看一下 PGT-A 整倍体率",
                 "再看一下 PGT-A 的质控情况",
                 "补充 PGT-A 的嵌合与异常结构",
-            ]
-        if metric_id == "pgta_age_distribution":
-            return [
-                "看一下当前快照下的 PGT-A 送检量",
-                "补充 PGT-A 的整倍体率",
-                "再看一下 PGT-A 的质控情况",
             ]
         if metric_id == "pgta_quality_overview":
             return [

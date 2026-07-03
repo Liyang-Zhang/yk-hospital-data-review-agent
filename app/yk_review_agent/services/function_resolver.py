@@ -22,6 +22,10 @@ class FunctionResolver:
 
         if explicit_metric_id:
             candidates.append(explicit_metric_id)
+            first_match_indices[explicit_metric_id] = self._first_match_index(
+                message=text,
+                metric=self._metric_by_id(explicit_metric_id),
+            )
 
         for metric in ROUTABLE_METRICS:
             score = self._match_score(metric=metric, message=text, parsed=parsed)
@@ -48,25 +52,21 @@ class FunctionResolver:
 
     def _match_score(self, *, metric: MetricDefinition, message: str, parsed: ParsedIntent) -> int:
         score = 0
-        if metric.metric_id == "pgta_age_distribution":
-            if parsed.breakdown == "age":
-                score += 30
-            score += self._term_score(message, metric.hard_terms, hard=True)
-            return score
-
         if metric.metric_id == "pgta_cycle_indicator_overview":
-            return self._term_score(message, metric.hard_terms, hard=True)
+            score += self._term_score(message, metric.hard_terms, hard=True)
+            score += self._term_score(message, metric.soft_terms, hard=False)
+            return score
 
         if metric.metric_id == "pgta_special_cnv_overview":
             return self._term_score(message, metric.hard_terms, hard=True)
 
         if metric.metric_id == "pgta_euploid_rate":
-            if parsed.breakdown == "age":
-                return 0
-            if self._contains_any(message, ("周期无整倍体", "周期整倍体率", "周期结局")):
+            if self._contains_any(message, ("周期无整倍体", "周期整倍体率", "周期整倍体结局", "周期结局")):
                 return 0
             score += self._term_score(message, metric.hard_terms, hard=True)
             score += self._term_score(message, metric.soft_terms, hard=False)
+            if parsed.breakdown == "age" and score > 0:
+                score += 5
             return score
 
         score += self._term_score(message, metric.hard_terms, hard=True)
@@ -106,10 +106,33 @@ class FunctionResolver:
                 return metric.route_priority
         return 10**6
 
+    def _metric_by_id(self, metric_id: str) -> MetricDefinition | None:
+        for metric in ROUTABLE_METRICS:
+            if metric.metric_id == metric_id:
+                return metric
+        return None
+
     def _apply_metric_disambiguation(
         self, *, message: str, candidate_metric_ids: list[str]
     ) -> list[str]:
         if "pgta_cycle_indicator_overview" in candidate_metric_ids:
+            if self._contains_any(
+                message,
+                (
+                    "周期维度",
+                    "周期层面",
+                    "从周期角度",
+                    "按周期看",
+                    "整体结局",
+                    "周期结局",
+                    "周期整倍体结局",
+                ),
+            ):
+                return [
+                    metric_id
+                    for metric_id in candidate_metric_ids
+                    if metric_id == "pgta_cycle_indicator_overview"
+                ]
             return [
                 metric_id
                 for metric_id in candidate_metric_ids
