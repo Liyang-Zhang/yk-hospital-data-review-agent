@@ -45,6 +45,8 @@ class ConversationAgent:
             parsed=parsed,
             hospital_id=request.host_context.hospital_id or session.hospital_id,
             hospital_name=request.host_context.hospital_name or session.hospital_name,
+            accessible_hospital_ids=request.host_context.accessible_hospital_ids,
+            can_access_all_hospitals=request.host_context.can_access_all_hospitals,
         )
         snapshot_metadata = snapshot_service.get_snapshot_metadata()
         if plan.answer_mode != "answer":

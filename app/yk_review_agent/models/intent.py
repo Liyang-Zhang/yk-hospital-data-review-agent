@@ -62,6 +62,8 @@ class ParsedIntent(BaseModel):
     has_explicit_time_range: bool = False
     has_explicit_product_scope: bool = False
     has_explicit_age_range: bool = False
+    has_explicit_hospital_scope: bool = False
+    requested_hospital_id: str | None = None
     normalized_message: str = Field(default="")
     follow_up_resolution: FollowUpResolution = Field(default_factory=FollowUpResolution)
     applied_filters: dict[str, str] = Field(default_factory=dict)

@@ -74,10 +74,19 @@ class FunctionResolver:
         return score
 
     def _contains_any(self, message: str, terms: tuple[str, ...]) -> bool:
-        return any(term.lower() in message for term in terms)
+        compact_message = self._compact_text(message)
+        return any(
+            term.lower() in message or self._compact_text(term.lower()) in compact_message
+            for term in terms
+        )
 
     def _term_score(self, message: str, terms: tuple[str, ...], *, hard: bool) -> int:
-        matches = [term for term in terms if term.lower() in message]
+        compact_message = self._compact_text(message)
+        matches = [
+            term
+            for term in terms
+            if term.lower() in message or self._compact_text(term.lower()) in compact_message
+        ]
         if not matches:
             return 0
         weight = 10 if hard else 3
@@ -88,18 +97,39 @@ class FunctionResolver:
         indices = [message.find(term.lower()) for term in terms if term and term.lower() in message]
         return min(indices) if indices else 10**6
 
+    def _compact_text(self, text: str) -> str:
+        return "".join(text.split())
+
     def _route_priority(self, metric_id: str) -> int:
         for metric in ROUTABLE_METRICS:
             if metric.metric_id == metric_id:
                 return metric.route_priority
         return 10**6
 
-    def _apply_metric_disambiguation(self, *, message: str, candidate_metric_ids: list[str]) -> list[str]:
+    def _apply_metric_disambiguation(
+        self, *, message: str, candidate_metric_ids: list[str]
+    ) -> list[str]:
+        if "pgta_cycle_indicator_overview" in candidate_metric_ids:
+            return [
+                metric_id
+                for metric_id in candidate_metric_ids
+                if metric_id not in {"pgta_euploid_rate", "pgt_total_volume"}
+            ]
         if {
             "pgta_special_cnv_overview",
             "pgta_mosaic_abnormal",
-        }.issubset(candidate_metric_ids) and self._contains_any(message, ("意外发现", "综合征", "拟常染色体", "p22.33")):
-            return [metric_id for metric_id in candidate_metric_ids if metric_id != "pgta_mosaic_abnormal"]
+        }.issubset(candidate_metric_ids) and (
+            self._contains_any(
+                message, ("意外发现", "综合征", "拟常染色体", "p22.33", "cnv提示")
+            )
+            or ("单独" in message and "cnv" in message)
+            or "不看整体结果结构" in self._compact_text(message)
+        ):
+            return [
+                metric_id
+                for metric_id in candidate_metric_ids
+                if metric_id != "pgta_mosaic_abnormal"
+            ]
         return candidate_metric_ids
 
 

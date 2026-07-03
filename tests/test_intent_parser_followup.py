@@ -256,3 +256,43 @@ def test_followup_switch_to_age_distribution_does_not_inherit_previous_age_filte
 
     assert parsed.metric_id == "pgta_age_distribution"
     assert parsed.age_range is None
+
+
+def test_followup_switches_to_abnormal_rate_and_preserves_safe_filters() -> None:
+    parsed = intent_parser_service.parse(
+        message="那异常率呢",
+        context=SessionContext(
+            current_topic="PGT-A 整倍体率",
+            time_range="2025年7月到2025年10月",
+            product_scope="PGT-A",
+            last_result_summary="已返回 2025年7月到2025年10月 >35岁患者的 PGT-A 整倍体率。",
+            last_analysis=LastAnalysisState(
+                metric_id="pgta_euploid_rate",
+                topic="PGT-A 整倍体率",
+                breakdown="overall",
+                time_grain="overall",
+                filters={
+                    "time_range": "2025年7月到2025年10月",
+                    "hospital_id": HOSPITAL_ID,
+                    "age_range": "gt:35",
+                },
+                product_scope="PGT-A",
+                presentation_mode="overview",
+                age_range="gt:35",
+            ),
+        ),
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+    )
+
+    assert parsed.metric_id == "pgta_mosaic_abnormal"
+    assert parsed.time_range == "2025年7月到2025年10月"
+    assert parsed.age_range == "gt:35"
+    plan = answerability_policy.evaluate(
+        message="那异常率呢",
+        parsed=parsed,
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+    )
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgta_mosaic_abnormal"

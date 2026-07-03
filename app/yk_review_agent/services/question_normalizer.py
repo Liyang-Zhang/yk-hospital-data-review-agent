@@ -35,6 +35,24 @@ class QuestionNormalizer:
         normalized = re.sub(r"\s+", " ", normalized).strip()
         return NormalizedQuestion(raw_message=message, normalized_message=normalized)
 
+    def extract_explicit_hospital(self, normalized_message: str) -> str | None:
+        matches = [
+            hospital_name
+            for hospital_name in self._canonical_hospital_names()
+            if hospital_name and hospital_name in normalized_message
+        ]
+        deduped = list(dict.fromkeys(matches))
+        if len(deduped) == 1:
+            return deduped[0]
+
+        probable_hospital = re.search(
+            r"([\u4e00-\u9fa5A-Za-z0-9]{2,40}(?:医院|保健院|医学中心))(?:这边)?",
+            normalized_message,
+        )
+        if probable_hospital:
+            return probable_hospital.group(1).strip()
+        return None
+
     def _compact_time_tokens(self, text: str) -> str:
         normalized = text
         normalized = re.sub(r"(\d)\s+年", r"\1年", normalized)
@@ -85,6 +103,8 @@ class QuestionNormalizer:
             (r"(\d{2})\s*及以下", r"<=\1岁"),
             (r"(\d{2})\s*岁以下", r"<\1岁"),
             (r"(\d{2})\s*以下", r"<\1岁"),
+            (r"(\d{2})\s*(?:到|至)\s*(\d{2})\s*岁", r"\1-\2岁"),
+            (r"(\d{2})\s*(?:到|至)\s*(\d{2})", r"\1-\2岁"),
             (r"(\d{2})\s*-\s*(\d{2})\s*岁", r"\1-\2岁"),
             (r"(\d{2})\s*-\s*(\d{2})", r"\1-\2岁"),
             (r"未填写年龄|年龄未填写|年龄缺失", "未填写年龄"),
@@ -96,6 +116,7 @@ class QuestionNormalizer:
 
     def _compact_age_tokens(self, text: str) -> str:
         normalized = text
+        normalized = re.sub(r"(\d{2}-\d{2})岁岁", r"\1岁", normalized)
         normalized = re.sub(r"([<>]=?)\s*(\d{2})\s*岁", r"\1\2岁", normalized)
         normalized = re.sub(r"(\d{2})\s*-\s*(\d{2})\s*岁", r"\1-\2岁", normalized)
         return normalized
@@ -104,6 +125,13 @@ class QuestionNormalizer:
         alias_map = self._get_hospital_alias_map()
         normalized = text
         for alias, canonical in alias_map.items():
+            if alias and alias.isdigit() and canonical not in normalized:
+                normalized = re.sub(
+                    rf"{re.escape(alias)}(?=(?:这边|医院|院|中心))",
+                    canonical,
+                    normalized,
+                )
+                continue
             if alias and alias in normalized and canonical not in normalized:
                 normalized = normalized.replace(alias, canonical)
         return normalized
@@ -128,6 +156,7 @@ class QuestionNormalizer:
                 candidate_set.add(name.replace("妇幼保健院", "妇幼"))
             if digit_match := re.search(r"(\d{3,})医院", name):
                 candidate_set.add(f"{digit_match.group(1)}医院")
+                candidate_set.add(digit_match.group(1))
             return {item.strip() for item in candidate_set if item and len(item.strip()) >= 3}
 
         hospital_names = self._hospital_names
@@ -147,6 +176,14 @@ class QuestionNormalizer:
 
         alias_map.update(unique_aliases)
         return alias_map
+
+    def _canonical_hospital_names(self) -> tuple[str, ...]:
+        hospital_names = self._hospital_names
+        if hospital_names is None:
+            hospital_names = [
+                str(hospital["hospital_name"]).strip() for hospital in get_pgta_dataset().hospitals
+            ]
+        return tuple(name for name in hospital_names if name)
 
 
 question_normalizer = QuestionNormalizer()

@@ -163,6 +163,8 @@ class IntentParserService:
             has_explicit_product_scope=parsed.has_explicit_product_scope,
             age_range=parsed.age_range,
             has_explicit_age_range=parsed.has_explicit_age_range,
+            has_explicit_hospital_scope=parsed.has_explicit_hospital_scope,
+            requested_hospital_id=parsed.requested_hospital_id,
             normalized_message=normalized_message,
             follow_up_resolution=parsed.follow_up_resolution,
             applied_filters={
@@ -180,6 +182,7 @@ class IntentParserService:
         business_request = business_request_service.parse(message)
         explicit_time_range = self._extract_time_range(message)
         age_range = self._extract_age_range(message)
+        requested_hospital_id = question_normalizer.extract_explicit_hospital(message)
         time_range = explicit_time_range or context.time_range or "当前快照全部时间"
         breakdown = self._infer_breakdown(message, age_range)
         focus = self._infer_focus(message)
@@ -201,6 +204,8 @@ class IntentParserService:
             has_explicit_product_scope=business_request_service.has_explicit_product_scope(message),
             age_range=age_range,
             has_explicit_age_range=age_range is not None,
+            has_explicit_hospital_scope=requested_hospital_id is not None,
+            requested_hospital_id=requested_hospital_id,
             normalized_message=message,
         )
 
@@ -270,9 +275,25 @@ class IntentParserService:
             return "month"
         if any(keyword in message for keyword in ("按季度", "分季度", "季度")):
             return "quarter"
-        if any(keyword in message for keyword in ("趋势", "变化")):
+        if any(keyword in message for keyword in ("趋势", "变化", "波动")):
             return "month"
-        if any(keyword in message for keyword in ("1Mb", "4Mb", "10Mb", "提示CNV", "CNV提示", "特殊 CNV", "特殊CNV", "综合征", "拟常染色体", "p22.33", "P22.33")):
+        if any(
+            keyword in message
+            for keyword in (
+                "1Mb",
+                "4Mb",
+                "10Mb",
+                "提示CNV",
+                "CNV提示",
+                "CNV 提示",
+                "特殊 CNV",
+                "特殊CNV",
+                "综合征",
+                "拟常染色体",
+                "p22.33",
+                "P22.33",
+            )
+        ):
             return "overall"
         if any(keyword in message for keyword in ("嵌合", "异常结构", "结果分布", "结果结构")):
             return "result"
@@ -281,8 +302,8 @@ class IntentParserService:
         return "overall"
 
     def _infer_focus(self, message: str) -> str:
-        if any(keyword in message for keyword in ("趋势", "变化", "分布", "结构")):
-            return "trend" if any(term in message for term in ("趋势", "变化")) else "distribution"
+        if any(keyword in message for keyword in ("趋势", "变化", "波动", "分布", "结构")):
+            return "trend" if any(term in message for term in ("趋势", "变化", "波动")) else "distribution"
         if "率" in message:
             return "rate"
         return "summary"

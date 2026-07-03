@@ -14,20 +14,41 @@ from yk_review_agent.services.metric_catalog import (
     active_data_capabilities,
     get_metric,
 )
+from yk_review_agent.services.pgta_detail_dataset import get_pgta_dataset
 
 
 class AnswerabilityPolicy:
-    def evaluate(self, *, message: str, parsed: ParsedIntent, hospital_id: str, hospital_name: str | None) -> AnalysisPlan:
+    def evaluate(
+        self,
+        *,
+        message: str,
+        parsed: ParsedIntent,
+        hospital_id: str,
+        hospital_name: str | None,
+        accessible_hospital_ids: list[str] | None = None,
+        can_access_all_hospitals: bool = False,
+    ) -> AnalysisPlan:
+        target_hospital_id = parsed.requested_hospital_id or hospital_id
         filters = {
             "time_range": parsed.time_range,
-            "hospital_id": hospital_id,
-            "hospital_name": hospital_name or hospital_id,
+            "hospital_id": target_hospital_id,
+            "hospital_name": target_hospital_id,
             "breakdown": parsed.breakdown,
             "focus": parsed.focus,
             **({"age_range": parsed.age_range} if parsed.age_range else {}),
         }
         time_grain = self._infer_time_grain(parsed.time_range, parsed.breakdown)
         resolution = function_resolver.resolve(message=parsed.normalized_message or message, parsed=parsed)
+        if hospital_access_plan := self._evaluate_hospital_access(
+            parsed=parsed,
+            filters=filters,
+            time_grain=time_grain,
+            host_hospital_id=hospital_id,
+            host_hospital_name=hospital_name or hospital_id,
+            accessible_hospital_ids=accessible_hospital_ids,
+            can_access_all_hospitals=can_access_all_hospitals,
+        ):
+            return hospital_access_plan
 
         if parsed.follow_up_resolution.mode == "none" and not self._is_domain_relevant(message):
             if "分析" in message:
@@ -411,6 +432,55 @@ class AnswerabilityPolicy:
             ],
         }
         return mapping.get(metric_id, CLARIFY_PROMPTS)
+
+    def _evaluate_hospital_access(
+        self,
+        *,
+        parsed: ParsedIntent,
+        filters: dict[str, str],
+        time_grain: str,
+        host_hospital_id: str,
+        host_hospital_name: str,
+        accessible_hospital_ids: list[str] | None,
+        can_access_all_hospitals: bool,
+    ) -> AnalysisPlan | None:
+        requested_hospital_id = parsed.requested_hospital_id
+        if not requested_hospital_id:
+            return None
+
+        known_hospitals = {item["hospital_id"] for item in get_pgta_dataset().hospitals}
+        if requested_hospital_id not in known_hospitals:
+            return AnalysisPlan(
+                product_scope="PGT-A",
+                breakdown=parsed.breakdown,
+                time_grain=time_grain,
+                filters=filters,
+                answer_mode="refuse",
+                rationale=f"当前可访问的数据集不包含“{requested_hospital_id}”，暂时无法查询该医院的数据。",
+                suggestions=REFUSE_SUGGESTIONS,
+                normalized_message=parsed.normalized_message,
+            )
+
+        if requested_hospital_id == host_hospital_id or can_access_all_hospitals:
+            return None
+
+        allowed_hospitals = set(accessible_hospital_ids or [host_hospital_id])
+        if requested_hospital_id in allowed_hospitals:
+            return None
+
+        return AnalysisPlan(
+            product_scope="PGT-A",
+            breakdown=parsed.breakdown,
+            time_grain=time_grain,
+            filters=filters,
+            answer_mode="refuse",
+            rationale=(
+                f"当前会话只具备“{host_hospital_name}”的数据访问权限，不能查询“{requested_hospital_id}”的数据。"
+                "请切换到有对应数据权限的医院账号，或由 IT 授权后再查询。"
+            ),
+            suggestions=REFUSE_SUGGESTIONS,
+            normalized_message=parsed.normalized_message,
+        )
 
 
 answerability_policy = AnswerabilityPolicy()

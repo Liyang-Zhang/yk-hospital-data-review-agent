@@ -11,6 +11,8 @@ class HostContext(BaseModel):
     hospital_id: str
     hospital_name: str | None = None
     host_session_id: str | None = None
+    accessible_hospital_ids: list[str] | None = None
+    can_access_all_hospitals: bool = False
 
 
 class ChatRequest(BaseModel):
