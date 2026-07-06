@@ -4,8 +4,9 @@ import re
 from datetime import date
 
 from yk_review_agent.models.chat import DataReadinessReport, SnapshotMetadata, SnapshotSourceSummary
+from yk_review_agent.models.session import SessionOverview
 from yk_review_agent.services.metric_catalog import active_data_capabilities, get_metric
-from yk_review_agent.services.pgta_detail_dataset import get_pgta_dataset
+from yk_review_agent.services.pgta_record_source import get_pgta_record_source
 from yk_review_agent.services.product_snapshot_registry import get_snapshot_registry
 
 
@@ -17,8 +18,28 @@ SNAPSHOT_LIMITATIONS = [
 
 
 class SnapshotService:
+    def build_session_overview(self, hospital_id: str, hospital_name: str | None = None) -> SessionOverview:
+        dataset = get_pgta_record_source()
+        records = dataset.filter_records(hospital_id=hospital_id)
+        cycle_count = len({item.cycle_id for item in records if item.cycle_id})
+        embryo_count = len(records)
+        snapshot_start, snapshot_end = self._session_snapshot_range(records, fallback=dataset.stat_month_range)
+        resolved_hospital_name = hospital_name or hospital_id
+        summary = (
+            f"当前快照下，{resolved_hospital_name} 已接入 {embryo_count} 个可分析胚胎样本，"
+            f"覆盖 {cycle_count} 个周期，时间范围 {snapshot_start} 至 {snapshot_end}。"
+        )
+        return SessionOverview(
+            hospital_name=resolved_hospital_name,
+            snapshot_start=snapshot_start,
+            snapshot_end=snapshot_end,
+            embryo_count=embryo_count,
+            cycle_count=cycle_count,
+            summary=summary,
+        )
+
     def get_snapshot_metadata(self) -> SnapshotMetadata:
-        dataset = get_pgta_dataset()
+        dataset = get_pgta_record_source()
         start, end = dataset.stat_month_range
         registry = get_snapshot_registry()
         profiles = registry.list_profiles()
@@ -82,7 +103,7 @@ class SnapshotService:
                 limitations=["需要补充字段或更换正式数据源后才能执行。"],
             )
 
-        dataset = get_pgta_dataset()
+        dataset = get_pgta_record_source()
         time_filter = self._parse_time_filter(filters.get("time_range", ""))
         records = dataset.filter_records(
             hospital_id=filters.get("hospital_id"),
@@ -109,6 +130,17 @@ class SnapshotService:
             summary=f"当前快照可执行“{metric.title}”，并已命中 {len(records)} 条有效胚胎记录。",
             record_count=len(records),
         )
+
+    def _session_snapshot_range(self, records: list, fallback: tuple[str, str]) -> tuple[str, str]:
+        if not records:
+            return fallback
+        buckets = [item.month_bucket for item in records if getattr(item, "month_bucket", "")]
+        if buckets:
+            return min(buckets), max(buckets)
+        created_months = [item.created_at.strftime("%Y-%m") for item in records if getattr(item, "created_at", None)]
+        if created_months:
+            return min(created_months), max(created_months)
+        return fallback
 
     def _parse_time_filter(self, text: str) -> dict[str, int | date | None]:
         result: dict[str, int | date | None] = {

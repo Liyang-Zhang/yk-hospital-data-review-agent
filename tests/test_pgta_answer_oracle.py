@@ -8,7 +8,8 @@ from yk_review_agent.core.config import settings
 from yk_review_agent.models.chat import ChatRequest, HostContext
 from yk_review_agent.models.session import SessionCreateRequest
 from yk_review_agent.services.agent import conversation_agent
-from yk_review_agent.services.pgta_detail_dataset import get_pgta_dataset
+from yk_review_agent.services.pgta_record_source import clear_pgta_record_source_cache
+from yk_review_agent.services.pgta_sqlite import PGTAExcelImporter, PGTASourceConfig
 from yk_review_agent.services.product_snapshot_registry import get_snapshot_registry
 from yk_review_agent.services.query_service import query_service
 from yk_review_agent.services.question_normalizer import question_normalizer
@@ -28,15 +29,35 @@ pytestmark = [pytest.mark.oracle, pytest.mark.integration, pytest.mark.slow]
 @pytest.fixture()
 def use_pgta_oracle_snapshot() -> None:
     original_pgta_file = settings.pgta_detail_file
+    original_snapshot_db_url = settings.snapshot_db_url
+    oracle_db_path = Path("tests/fixtures/snapshots/pgta-shanxi-oracle.db").resolve()
     settings.pgta_detail_file = str(ORACLE_SNAPSHOT)
-    get_pgta_dataset.cache_clear()
+    settings.snapshot_db_url = f"sqlite+pysqlite:///{oracle_db_path}"
+    if oracle_db_path.exists():
+        oracle_db_path.unlink()
+    PGTAExcelImporter(
+        settings.snapshot_db_url,
+        source_configs=[
+            PGTASourceConfig(
+                snapshot_year=2025,
+                snapshot_half="oracle",
+                file_path=str(ORACLE_SNAPSHOT),
+                sheet_name="2025年-数据",
+                column_map={},
+            )
+        ],
+    ).rebuild()
+    clear_pgta_record_source_cache()
     get_snapshot_registry.cache_clear()
     question_normalizer._hospital_alias_map = None
     yield
     settings.pgta_detail_file = original_pgta_file
-    get_pgta_dataset.cache_clear()
+    settings.snapshot_db_url = original_snapshot_db_url
+    clear_pgta_record_source_cache()
     get_snapshot_registry.cache_clear()
     question_normalizer._hospital_alias_map = None
+    if oracle_db_path.exists():
+        oracle_db_path.unlink()
 
 
 def test_pgta_volume_matches_oracle_for_2025(use_pgta_oracle_snapshot: None) -> None:

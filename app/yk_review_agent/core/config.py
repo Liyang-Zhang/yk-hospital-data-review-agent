@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     api_prefix: str = Field(default="/api/v1", alias="API_PREFIX")
 
     database_url: str = Field(default="sqlite+pysqlite:///./demo.db", alias="DATABASE_URL")
+    snapshot_backend: str = Field(default="sqlite", alias="SNAPSHOT_BACKEND")
+    snapshot_db_url: str = Field(default="sqlite+pysqlite:///./snapshot.db", alias="SNAPSHOT_DB_URL")
     llm_model: str = Field(default="qwen-plus", alias="LLM_MODEL")
     llm_base_url: str = Field(
         default="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -28,6 +30,22 @@ class Settings(BaseSettings):
     pgta_detail_file: str = Field(
         default="docs/PGTA数据统计输出-2025年.xlsx",
         alias="PGTA_DETAIL_FILE",
+    )
+    pgta_snapshot_2023_file: str = Field(
+        default="docs/PGTA胚胎统计表-2023年.xlsx",
+        alias="PGTA_SNAPSHOT_2023_FILE",
+    )
+    pgta_snapshot_2024_file: str = Field(
+        default="docs/PGTA数据统计输出-2024.xlsx",
+        alias="PGTA_SNAPSHOT_2024_FILE",
+    )
+    pgta_snapshot_2025_file: str = Field(
+        default="docs/PGTA数据统计输出-2025年.xlsx",
+        alias="PGTA_SNAPSHOT_2025_FILE",
+    )
+    pgta_snapshot_2026_file: str = Field(
+        default="docs/PGTA数据统计输出-2026.6.30.xlsx",
+        alias="PGTA_SNAPSHOT_2026_FILE",
     )
     pgtah_snapshot_file: str = Field(
         default="docs/PGTAH数据统计输出-2025年-上传微盘.xlsx",

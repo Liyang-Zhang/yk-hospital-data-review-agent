@@ -99,6 +99,36 @@ def test_volume_trend_routes_to_total_volume() -> None:
     assert resolution.candidate_metric_ids == ["pgt_total_volume"]
 
 
+def test_avg_blastocyst_routes_to_quality_overview() -> None:
+    resolution = function_resolver.resolve(
+        message="25年PGT-A的平均囊胚数",
+        parsed=_parsed(),
+    )
+
+    assert resolution.metric_id == "pgta_quality_overview"
+    assert resolution.candidate_metric_ids == ["pgta_quality_overview"]
+
+
+def test_detection_success_rate_routes_to_quality_overview() -> None:
+    resolution = function_resolver.resolve(
+        message="2025年PGTA检测成功率是多少",
+        parsed=_parsed(focus="rate"),
+    )
+
+    assert resolution.metric_id == "pgta_quality_overview"
+    assert resolution.candidate_metric_ids == ["pgta_quality_overview"]
+
+
+def test_avg_embryos_per_cycle_routes_to_total_volume() -> None:
+    resolution = function_resolver.resolve(
+        message="2025年PGT-A平均每周期胚胎数是多少",
+        parsed=_parsed(),
+    )
+
+    assert resolution.metric_id == "pgt_total_volume"
+    assert resolution.candidate_metric_ids == ["pgt_total_volume"]
+
+
 def test_multi_metric_oral_question_keeps_both_candidates() -> None:
     resolution = function_resolver.resolve(
         message="山西妇幼在25年7月到10月年龄大于35岁的患者送了多少周期，整倍体率如何",

@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Iterable
 
-from yk_review_agent.services.pgta_detail_dataset import get_pgta_dataset
+from yk_review_agent.services.pgta_record_source import get_pgta_record_source
 
 
 @dataclass(frozen=True)
@@ -161,7 +161,7 @@ class QuestionNormalizer:
 
         hospital_names = self._hospital_names
         if hospital_names is None:
-            hospital_names = [str(hospital["hospital_name"]).strip() for hospital in get_pgta_dataset().hospitals]
+            hospital_names = [str(hospital["hospital_name"]).strip() for hospital in get_pgta_record_source().hospitals]
 
         for hospital_name in hospital_names:
             for alias in variants(hospital_name):
@@ -181,7 +181,7 @@ class QuestionNormalizer:
         hospital_names = self._hospital_names
         if hospital_names is None:
             hospital_names = [
-                str(hospital["hospital_name"]).strip() for hospital in get_pgta_dataset().hospitals
+                str(hospital["hospital_name"]).strip() for hospital in get_pgta_record_source().hospitals
             ]
         return tuple(name for name in hospital_names if name)
 

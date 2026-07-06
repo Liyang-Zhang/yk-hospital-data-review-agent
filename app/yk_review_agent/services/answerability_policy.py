@@ -14,7 +14,7 @@ from yk_review_agent.services.metric_catalog import (
     active_data_capabilities,
     get_metric,
 )
-from yk_review_agent.services.pgta_detail_dataset import get_pgta_dataset
+from yk_review_agent.services.pgta_record_source import get_pgta_record_source
 
 AMBIGUOUS_EUPLOID_OBJECT_TERMS = (
     "无整倍体率",
@@ -504,7 +504,7 @@ class AnswerabilityPolicy:
         if not requested_hospital_id:
             return None
 
-        known_hospitals = {item["hospital_id"] for item in get_pgta_dataset().hospitals}
+        known_hospitals = {item["hospital_id"] for item in get_pgta_record_source().hospitals}
         if requested_hospital_id not in known_hospitals:
             return AnalysisPlan(
                 product_scope="PGT-A",

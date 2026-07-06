@@ -2,7 +2,8 @@ from datetime import datetime
 
 import pytest
 
-from yk_review_agent.services.pgta_detail_dataset import DetailRecord, get_pgta_dataset
+from yk_review_agent.services.pgta_detail_dataset import DetailRecord
+from yk_review_agent.services.pgta_record_source import get_pgta_record_source
 from yk_review_agent.services.query_service import (
     _is_incidental_mosaic_cnv,
     _is_pseudoautosomal_deletion,
@@ -38,8 +39,8 @@ def test_quarter_breakdown_returns_expected_shape() -> None:
 
 
 def test_day_filter_is_applied() -> None:
-    sample_day = get_pgta_dataset().eligible_records[0].created_at.strftime("%Y年%-m月%-d号")
-    sample_day_key = get_pgta_dataset().eligible_records[0].created_at.strftime("%Y-%m-%d")
+    sample_day = get_pgta_record_source().eligible_records[0].created_at.strftime("%Y年%-m月%-d号")
+    sample_day_key = get_pgta_record_source().eligible_records[0].created_at.strftime("%Y-%m-%d")
     result = query_service.run(
         "pgt_total_volume",
         {**BASE_FILTERS, "time_range": sample_day, "breakdown": "day", "focus": "summary"},

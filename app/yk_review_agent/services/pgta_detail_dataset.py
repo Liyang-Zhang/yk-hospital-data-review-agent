@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
+import re
 
 from openpyxl import load_workbook
 
@@ -115,6 +116,53 @@ def _normalize_age_label(value: object) -> str:
     return mapping.get(text, text)
 
 
+def _normalize_text(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _normalize_sample_type(value: object) -> str:
+    text = _normalize_text(value)
+    return re.sub(r"\s+", " ", text)
+
+
+def _normalize_result_label(value: object) -> str:
+    text = _normalize_text(value)
+    mapping = {
+        "未见染色体拷贝数异常": "未见异常",
+        "—": "/",
+        "——": "/",
+        "-": "/",
+    }
+    return mapping.get(text, text)
+
+
+def _normalize_qc_conclusion(value: object) -> str:
+    text = _normalize_text(value).upper()
+    if text in {"/", "-", "—", "——", "XX"}:
+        return ""
+    return text
+
+
+def _normalize_binary_flag(value: object) -> str:
+    text = _normalize_text(value)
+    mapping = {
+        "是": "有",
+        "否": "无",
+        "/": "",
+        "-": "",
+        "—": "",
+        "——": "",
+    }
+    return mapping.get(text, text)
+
+
+def _normalize_aneuploidy_label(value: object) -> str:
+    text = _normalize_text(value)
+    if text in {"/", "-", "—", "——"}:
+        return ""
+    return text
+
+
 def _to_float(value: object) -> float | None:
     if value in (None, ""):
         return None
@@ -161,7 +209,7 @@ class PGTADetailDataset:
             created_at = _parse_datetime(value(row, "报告审核时间", "项目日期"))
             sample_id = str(value(row, "样本编号") or "").strip()
             hospital_name = str(value(row, "送检单位名称") or "").strip()
-            sample_type = str(value(row, "样本类型") or "")
+            sample_type = _normalize_sample_type(value(row, "样本类型"))
             month_bucket = str(value(row, "月份") or "").strip()
             if created_at is None or not sample_id or not hospital_name:
                 continue
@@ -184,21 +232,21 @@ class PGTADetailDataset:
                     hospital_name=hospital_name,
                     hospital_code=hospital_name,
                     product_name=product_name,
-                    description_cn=str(value(row, "结果解释") or "").strip(),
+                    description_cn=_normalize_result_label(value(row, "结果解释")),
                     description_en="",
-                    qc_conclusion=str(value(row, "data_QC_conclusion") or "").strip(),
+                    qc_conclusion=_normalize_qc_conclusion(value(row, "data_QC_conclusion")),
                     ldpgta_qc_conclusion="",
                     age=age,
                     age_label=age_label,
                     mapd=None,
                     bincv=_to_float(value(row, "CV(1000K_bin_size)")),
                     cnvpq=None,
-                    cnv_type=str(value(row, "CNV检测结果") or "").strip(),
-                    upd_arms=str(value(row, "染色体位置") or "").strip(),
-                    ldpgta_cnv_type=str(value(row, "提示CNV") or "").strip(),
-                    result_detail=str(value(row, "结果说明") or "").strip(),
-                    incidental_label=str(value(row, "意外发现（人工处理）") or "").strip(),
-                    aneuploidy_label=str(value(row, "异倍体结果（人工处理）") or "").strip(),
+                    cnv_type=_normalize_text(value(row, "CNV检测结果")),
+                    upd_arms=_normalize_text(value(row, "染色体位置")),
+                    ldpgta_cnv_type=_normalize_text(value(row, "提示CNV")),
+                    result_detail=_normalize_text(value(row, "结果说明")),
+                    incidental_label=_normalize_binary_flag(value(row, "意外发现（人工处理）")),
+                    aneuploidy_label=_normalize_aneuploidy_label(value(row, "异倍体结果（人工处理）")),
                 )
             )
         return records

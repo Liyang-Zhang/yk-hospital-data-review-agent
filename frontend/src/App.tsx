@@ -421,8 +421,12 @@ function UserWorkspace({
   turns,
 }: WorkspaceProps) {
   const hospitalName = metadata?.default_hospital?.hospital_name ?? session?.hospital_name ?? "当前医院";
-  const snapshotRange =
-    metadata ? `${metadata.snapshot_start.slice(0, 10)} 至 ${metadata.snapshot_end.slice(0, 10)}` : "等待快照信息";
+  const overview = session?.overview ?? null;
+  const snapshotRange = overview
+    ? `${overview.snapshot_start} 至 ${overview.snapshot_end}`
+    : metadata
+      ? `${metadata.snapshot_start.slice(0, 10)} 至 ${metadata.snapshot_end.slice(0, 10)}`
+      : "等待快照信息";
   const latestAssistant = [...turns].reverse().find((turn) => turn.role === "assistant" && turn.response);
   const sessionReady = Boolean(session);
 
@@ -452,6 +456,8 @@ function UserWorkspace({
               <h1>{hospitalName} PGT-A 数据回顾</h1>
             </div>
           </div>
+
+          {overview ? <SessionOverviewPanel overview={overview} /> : null}
 
           <form className="user-composer" onSubmit={onSubmit}>
             <textarea
@@ -635,5 +641,48 @@ function UserWorkspace({
         </section>
       </main>
     </div>
+  );
+}
+
+function SessionOverviewPanel({ overview }: { overview: NonNullable<SessionRecord["overview"]> }) {
+  const avgEmbryosPerCycle =
+    overview.cycle_count > 0 ? (overview.embryo_count / overview.cycle_count).toFixed(2) : "0.00";
+
+  return (
+    <section className="session-overview-panel">
+      <div className="session-overview-copy">
+        <div className="session-overview-kicker">Current Snapshot View</div>
+        <h2>会话已连接，先看当前医院的整体盘面</h2>
+        <p>{overview.summary}</p>
+      </div>
+
+      <div className="session-overview-grid">
+        <article className="session-overview-stat session-overview-stat-hero">
+          <span className="session-overview-label">当前快照胚胎数</span>
+          <strong>{overview.embryo_count.toLocaleString("zh-CN")}</strong>
+          <span className="session-overview-footnote">可直接进入 PGT-A 受控统计分析的胚胎样本</span>
+        </article>
+
+        <article className="session-overview-stat">
+          <span className="session-overview-label">覆盖周期数</span>
+          <strong>{overview.cycle_count.toLocaleString("zh-CN")}</strong>
+          <span className="session-overview-footnote">按送检单编号去重后的周期规模</span>
+        </article>
+
+        <article className="session-overview-stat session-overview-stat-soft">
+          <span className="session-overview-label">平均每周期胚胎数</span>
+          <strong>{avgEmbryosPerCycle}</strong>
+          <span className="session-overview-footnote">帮助客户先建立当前盘面的规模感知</span>
+        </article>
+
+        <article className="session-overview-stat session-overview-stat-range">
+          <span className="session-overview-label">数据覆盖月份</span>
+          <strong>
+            {overview.snapshot_start} <span>至</span> {overview.snapshot_end}
+          </strong>
+          <span className="session-overview-footnote">后续追问默认沿用当前医院，再叠加时间和年龄筛选</span>
+        </article>
+      </div>
+    </section>
   );
 }

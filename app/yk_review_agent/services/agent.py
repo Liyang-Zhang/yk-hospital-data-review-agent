@@ -19,7 +19,7 @@ from yk_review_agent.models.session import LastAnalysisState, SessionContext, Se
 from yk_review_agent.services.answerability_policy import answerability_policy
 from yk_review_agent.services.business_request_service import business_request_service
 from yk_review_agent.services.intent_parser import intent_parser_service
-from yk_review_agent.services.pgta_detail_dataset import get_pgta_dataset
+from yk_review_agent.services.pgta_record_source import get_pgta_record_source
 from yk_review_agent.services.query_service import query_service
 from yk_review_agent.services.report_service import report_service
 from yk_review_agent.services.session_store import session_store
@@ -64,7 +64,7 @@ class ConversationAgent:
         query_result = query_service.run(plan.metric_family or "", plan.filters)
         presentation = report_service.build_cards(plan.metric_family or "", query_result)
         data_readiness = snapshot_service.build_data_readiness(plan.metric_family, plan.filters)
-        snapshot_start, snapshot_end = get_pgta_dataset().stat_month_range
+        snapshot_start, snapshot_end = get_pgta_record_source().stat_month_range
         hospital_name = request.host_context.hospital_name or session.hospital_name or session.hospital_id
         assistant_text = (
             f"当前医院 {hospital_name}：{query_result['summary']} 数据范围来自当前业务整理的 PGT-A 快照，"

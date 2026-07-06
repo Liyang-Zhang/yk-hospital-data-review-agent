@@ -45,7 +45,7 @@ METRICS: tuple[MetricDefinition, ...] = (
         example_questions=("看一下当前快照下的 PGT-A 送检量", "按季度看一下 PGT-A 送检趋势"),
         route_priority=70,
         hard_terms=("送检量", "送检情况", "送检趋势", "多少周期", "多少胚胎", "周期量", "胚胎量"),
-        soft_terms=("送检", "周期数", "胚胎数", "平均囊胚数", "送了多少"),
+        soft_terms=("送检", "周期数", "胚胎数", "平均每周期胚胎数", "送了多少"),
         aliases=("volume",),
         disambiguation_notes=("当问题只提周期无整倍体或周期结局时，不应落到送检量。",),
     ),

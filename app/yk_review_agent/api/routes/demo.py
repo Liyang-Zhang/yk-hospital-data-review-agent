@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from yk_review_agent.services.pgta_detail_dataset import get_pgta_dataset
+from yk_review_agent.services.pgta_record_source import get_pgta_record_source
 from yk_review_agent.services.snapshot_service import snapshot_service
 
 router = APIRouter()
@@ -8,7 +8,7 @@ router = APIRouter()
 
 @router.get("/demo/metadata")
 def demo_metadata() -> dict:
-    dataset = get_pgta_dataset()
+    dataset = get_pgta_record_source()
     snapshot = snapshot_service.get_snapshot_metadata()
     hospitals = dataset.hospitals
     return {

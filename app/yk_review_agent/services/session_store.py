@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from yk_review_agent.models.session import SessionCreateRequest, SessionMessage, SessionRecord
+from yk_review_agent.services.snapshot_service import snapshot_service
 
 
 class InMemorySessionStore:
@@ -12,12 +13,14 @@ class InMemorySessionStore:
 
     def create_session(self, payload: SessionCreateRequest) -> SessionRecord:
         session_id = str(uuid4())
+        hospital_name = payload.hospital_name or payload.hospital_id
         record = SessionRecord(
             session_id=session_id,
             user_id=payload.user_id,
             hospital_id=payload.hospital_id,
-            hospital_name=payload.hospital_name,
+            hospital_name=hospital_name,
             host_session_id=payload.host_session_id,
+            overview=snapshot_service.build_session_overview(payload.hospital_id, hospital_name),
         )
         self._sessions[session_id] = record
         return record

@@ -5,12 +5,13 @@ from collections import Counter, defaultdict
 from datetime import date, datetime
 from statistics import mean
 
-from yk_review_agent.services.pgta_detail_dataset import DetailRecord, get_pgta_dataset
+from yk_review_agent.services.pgta_detail_dataset import DetailRecord
+from yk_review_agent.services.pgta_record_source import get_pgta_record_source
 
 
 class QueryService:
     def run(self, metric_id: str, filters: dict[str, str]) -> dict:
-        dataset = get_pgta_dataset()
+        dataset = get_pgta_record_source()
         time_filter = _parse_time_filter(filters.get("time_range", ""))
         breakdown = filters.get("breakdown", "overall")
         records = dataset.filter_records(
@@ -207,7 +208,7 @@ class QueryService:
         ) else 0.0
 
         warnings = [
-            "扩增成功率在当前快照中缺少稳定可回溯的原始阈值口径，本轮暂不在执行结果里给出正式数值。"
+            "当前“检测成功率”已按 CNV检测结果非空口径计算；“扩增成功率”仍缺少稳定可回溯的原始阈值口径，本轮暂不在执行结果里给出正式数值。"
         ]
 
         if breakdown in {"month", "quarter", "day"}:

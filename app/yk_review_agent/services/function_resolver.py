@@ -115,7 +115,46 @@ class FunctionResolver:
     def _apply_metric_disambiguation(
         self, *, message: str, candidate_metric_ids: list[str]
     ) -> list[str]:
+        quality_metric_ids = {"pgta_quality_overview"}
+        volume_metric_ids = {"pgt_total_volume"}
+
+        if quality_metric_ids.intersection(candidate_metric_ids) and volume_metric_ids.intersection(candidate_metric_ids):
+            if self._contains_any(
+                message,
+                (
+                    "检测成功率",
+                    "扩增成功率",
+                    "检测周期数",
+                    "检测胚胎数",
+                    "平均囊胚数",
+                    "na率",
+                    "na数",
+                    "质控",
+                    "pass",
+                    "fail",
+                    "info",
+                ),
+            ):
+                return [
+                    metric_id
+                    for metric_id in candidate_metric_ids
+                    if metric_id == "pgta_quality_overview"
+                ]
+
         if "pgta_cycle_indicator_overview" in candidate_metric_ids:
+            if "pgt_total_volume" in candidate_metric_ids and self._contains_any(
+                message,
+                (
+                    "平均每周期胚胎数",
+                    "每周期胚胎数",
+                    "平均每周期囊胚数",
+                ),
+            ):
+                return [
+                    metric_id
+                    for metric_id in candidate_metric_ids
+                    if metric_id != "pgta_cycle_indicator_overview"
+                ]
             if self._contains_any(
                 message,
                 (

@@ -131,6 +131,15 @@ export type SessionRecord = {
   user_id: string;
   hospital_id: string;
   hospital_name?: string | null;
+  overview?: {
+    hospital_name: string;
+    product_scope: string;
+    snapshot_start: string;
+    snapshot_end: string;
+    embryo_count: number;
+    cycle_count: number;
+    summary: string;
+  } | null;
 };
 
 export type DemoMetadata = {

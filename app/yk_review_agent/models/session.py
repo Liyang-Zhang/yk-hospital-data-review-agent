@@ -37,6 +37,16 @@ class SessionContext(BaseModel):
     last_analysis: LastAnalysisState | None = None
 
 
+class SessionOverview(BaseModel):
+    hospital_name: str
+    product_scope: str = "PGT-A"
+    snapshot_start: str
+    snapshot_end: str
+    embryo_count: int = 0
+    cycle_count: int = 0
+    summary: str
+
+
 class SessionRecord(BaseModel):
     session_id: str
     user_id: str
@@ -45,5 +55,6 @@ class SessionRecord(BaseModel):
     host_session_id: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    overview: SessionOverview | None = None
     context: SessionContext = Field(default_factory=SessionContext)
     messages: list[SessionMessage] = Field(default_factory=list)
