@@ -22,6 +22,9 @@ CANONICAL_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "result_label": ("结果解释",),
     "qc_result": ("data_QC_conclusion", "QC_conclusion"),
     "female_age": ("受检人年龄（人工处理）", "受检人年龄（系统）", "受检人年龄"),
+    "spouse_age": ("配偶年龄",),
+    "patient_karyotype": ("受检人核型",),
+    "spouse_karyotype": ("配偶核型",),
     "bin_cv": ("CV(1000K_bin_size)",),
     "cnv_result": ("CNV检测结果",),
     "cnv_hint": ("提示CNV",),
@@ -93,10 +96,10 @@ SOURCE_CONFIGS: tuple[SnapshotSourceConfig, ...] = (
         product_label="PGT-SR（含 MaReCs 相关字段）",
         file_path=settings.pgtsr_snapshot_file,
         sheet_name="2025年-数据",
-        execution_status="metadata_only",
+        execution_status="executable",
         notes=(
-            "快照包含 MaReCs 第二阶段相关字段。",
-            "当前尚未接入真实统计执行。",
+            "快照包含核型、年龄、下一步筛查和 MaReCs 第二阶段相关字段。",
+            "当前已接入 PGT-SR 第一阶段真实统计执行。",
         ),
     ),
     SnapshotSourceConfig(

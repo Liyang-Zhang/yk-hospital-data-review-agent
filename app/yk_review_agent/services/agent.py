@@ -20,6 +20,7 @@ from yk_review_agent.services.answerability_policy import answerability_policy
 from yk_review_agent.services.business_request_service import business_request_service
 from yk_review_agent.services.intent_parser import intent_parser_service
 from yk_review_agent.services.pgta_record_source import get_pgta_record_source
+from yk_review_agent.services.pgtsr_record_source import get_pgtsr_record_source
 from yk_review_agent.services.query_service import query_service
 from yk_review_agent.services.report_service import report_service
 from yk_review_agent.services.session_store import session_store
@@ -45,10 +46,11 @@ class ConversationAgent:
             parsed=parsed,
             hospital_id=request.host_context.hospital_id or session.hospital_id,
             hospital_name=request.host_context.hospital_name or session.hospital_name,
+            hospital_scope_mode=request.host_context.hospital_scope_mode,
             accessible_hospital_ids=request.host_context.accessible_hospital_ids,
             can_access_all_hospitals=request.host_context.can_access_all_hospitals,
         )
-        snapshot_metadata = snapshot_service.get_snapshot_metadata()
+        snapshot_metadata = snapshot_service.get_snapshot_metadata_for_product(plan.product_scope)
         if plan.answer_mode != "answer":
             return self._non_answer_response(
                 request,
@@ -64,16 +66,19 @@ class ConversationAgent:
         query_result = query_service.run(plan.metric_family or "", plan.filters)
         presentation = report_service.build_cards(plan.metric_family or "", query_result)
         data_readiness = snapshot_service.build_data_readiness(plan.metric_family, plan.filters)
-        snapshot_start, snapshot_end = get_pgta_record_source().stat_month_range
+        requested_time_range = plan.filters.get("time_range", "")
         hospital_name = request.host_context.hospital_name or session.hospital_name or session.hospital_id
-        assistant_text = (
-            f"当前医院 {hospital_name}：{query_result['summary']} 数据范围来自当前业务整理的 PGT-A 快照，"
-            f"统计月份覆盖 {snapshot_start} 至 {snapshot_end}。"
+        scope_suffix = (
+            f"本次按“{requested_time_range}”筛选统计。"
+            if requested_time_range and requested_time_range != "当前快照全部时间"
+            else f"统计月份覆盖 {session.overview.snapshot_start} 至 {session.overview.snapshot_end}。"
         )
+        assistant_text = f"当前医院 {hospital_name}：{query_result['summary']} 数据范围来自当前业务整理的 {plan.product_scope} 快照，{scope_suffix}"
         session.context = SessionContext(
             current_topic=parsed.topic,
             time_range=parsed.time_range,
             product_scope=plan.product_scope,
+            hospital_scope_mode=request.host_context.hospital_scope_mode,
             last_result_summary=assistant_text,
             applied_filters=plan.filters,
             last_analysis=LastAnalysisState(
@@ -144,6 +149,7 @@ class ConversationAgent:
             current_topic=topic,
             time_range=plan.filters.get("time_range"),
             product_scope=plan.product_scope,
+            hospital_scope_mode=request.host_context.hospital_scope_mode,
             last_result_summary=assistant_text,
             applied_filters=plan.filters,
             last_analysis=session.context.last_analysis,
@@ -165,7 +171,7 @@ class ConversationAgent:
                 rationale=plan.rationale,
                 applied_filters=plan.filters,
                 metric_ids=[],
-                warnings=plan.warnings or ["当前快照模式已接入多产品文件，但真实执行主链路仍只支持 PGT-A 统计问题。"],
+                warnings=plan.warnings or ["当前快照模式已接入多产品文件；真实执行主链路当前只支持 PGT-A 与 PGT-SR 第一阶段统计问题。"],
             ),
             result_cards=presentation.result_cards,
             follow_up_suggestions=plan.suggestions,
@@ -328,12 +334,29 @@ class ConversationAgent:
                 "看一下 PGT-A 的特殊 CNV 提示情况",
                 "再看一下 PGT-A 的质控情况",
             ]
+        if metric_id == "pgtsr_total_volume":
+            return [
+                "看一下 PGT-SR 质控情况",
+                "看一下 PGT-SR 结果分布",
+                "看一下 PGT-SR 是否进入下一步易位筛查",
+            ]
+        if metric_id == "pgtsr_cycle_indicator_overview":
+            return [
+                "按临床指征看一下 PGT-SR 周期结局",
+                "看一下 PGT-SR 是否进入下一步易位筛查",
+                "看一下 PGT-SR 结果分布",
+            ]
         return [
             "看一下当前快照下的 PGT-A 送检量",
             "看一下 PGT-A 的整倍体率",
             "按年龄分层看一下 PGT-A 整倍体率",
             "再看一下 PGT-A 的质控情况",
         ]
+
+    def _record_source(self, product_scope: str):
+        if product_scope == "PGT-SR":
+            return get_pgtsr_record_source()
+        return get_pgta_record_source()
 
     def _build_route_trace(
         self,

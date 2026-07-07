@@ -131,9 +131,13 @@ export type SessionRecord = {
   user_id: string;
   hospital_id: string;
   hospital_name?: string | null;
+  hospital_scope_mode?: "single" | "all";
+  can_access_all_hospitals?: boolean;
+  accessible_hospital_ids?: string[] | null;
   overview?: {
     hospital_name: string;
     product_scope: string;
+    hospital_scope_mode?: "single" | "all";
     snapshot_start: string;
     snapshot_end: string;
     embryo_count: number;
@@ -148,6 +152,7 @@ export type DemoMetadata = {
   snapshot_start: string;
   snapshot_end: string;
   hospital_count: number;
+  can_access_all_hospitals: boolean;
   capability_overview: {
     supported_topics: string[];
     supported_dimensions: string[];
@@ -167,6 +172,8 @@ export type DemoMetadata = {
     sample_count: number;
   }>;
 };
+
+export type DemoAccessMode = "single" | "all";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:18765/api/v1";
 
@@ -365,8 +372,13 @@ function isChatResponse(value: unknown): value is ChatResponse {
   return true;
 }
 
-export async function fetchDemoMetadata(): Promise<DemoMetadata> {
-  const response = await fetch(`${API_BASE}/demo/metadata`);
+export async function fetchDemoMetadata(
+  productScope: string = "PGT-A",
+  accessMode: DemoAccessMode = "all",
+): Promise<DemoMetadata> {
+  const response = await fetch(
+    `${API_BASE}/demo/metadata?product_scope=${encodeURIComponent(productScope)}&access_mode=${encodeURIComponent(accessMode)}`,
+  );
   if (!response.ok) {
     throw new Error("Failed to load demo metadata");
   }
@@ -376,6 +388,10 @@ export async function fetchDemoMetadata(): Promise<DemoMetadata> {
 export async function createSession(hospital: {
   hospital_id: string;
   hospital_name: string;
+  product_scope?: string;
+  hospital_scope_mode?: "single" | "all";
+  accessible_hospital_ids?: string[];
+  can_access_all_hospitals?: boolean;
 }): Promise<SessionRecord> {
   const response = await fetch(`${API_BASE}/sessions`, {
     method: "POST",
@@ -385,6 +401,10 @@ export async function createSession(hospital: {
       hospital_id: hospital.hospital_id,
       hospital_name: hospital.hospital_name,
       host_session_id: "demo-host-session",
+      product_scope: hospital.product_scope ?? "PGT-A",
+      hospital_scope_mode: hospital.hospital_scope_mode ?? "single",
+      accessible_hospital_ids: hospital.accessible_hospital_ids ?? [hospital.hospital_id],
+      can_access_all_hospitals: hospital.can_access_all_hospitals ?? false,
     }),
   });
   if (!response.ok) {
@@ -396,7 +416,13 @@ export async function createSession(hospital: {
 export async function sendMessage(
   sessionId: string,
   message: string,
-  hospital: { hospital_id: string; hospital_name: string },
+  hospital: {
+    hospital_id: string;
+    hospital_name: string;
+    hospital_scope_mode?: "single" | "all";
+    accessible_hospital_ids?: string[];
+    can_access_all_hospitals?: boolean;
+  },
 ): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE}/chat`, {
     method: "POST",
@@ -408,7 +434,10 @@ export async function sendMessage(
         user_id: "demo-user",
         hospital_id: hospital.hospital_id,
         hospital_name: hospital.hospital_name,
+        hospital_scope_mode: hospital.hospital_scope_mode ?? "single",
         host_session_id: "demo-host-session",
+        accessible_hospital_ids: hospital.accessible_hospital_ids ?? [hospital.hospital_id],
+        can_access_all_hospitals: hospital.can_access_all_hospitals ?? false,
       },
     }),
   });

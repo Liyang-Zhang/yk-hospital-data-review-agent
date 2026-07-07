@@ -25,3 +25,20 @@ def test_snapshot_readiness_uses_current_pgta_snapshot() -> None:
     assert readiness is not None
     assert readiness.status == "ready"
     assert readiness.record_count > 0
+
+
+def test_snapshot_readiness_uses_current_pgtsr_snapshot() -> None:
+    readiness = snapshot_service.build_data_readiness(
+        "pgtsr_total_volume",
+        {
+            "hospital_id": "中国人民解放军医院301医院",
+            "hospital_name": "中国人民解放军医院301医院",
+            "time_range": "当前快照全部时间",
+            "breakdown": "overall",
+            "focus": "summary",
+        },
+    )
+
+    assert readiness is not None
+    assert readiness.status == "ready"
+    assert readiness.record_count > 0

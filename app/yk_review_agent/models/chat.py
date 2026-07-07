@@ -4,12 +4,14 @@ from pydantic import BaseModel, Field
 
 from yk_review_agent.models.analysis import AnswerMode
 from yk_review_agent.models.business_request import ProductCapability
+from yk_review_agent.models.session import HospitalScopeMode
 
 
 class HostContext(BaseModel):
     user_id: str
     hospital_id: str
     hospital_name: str | None = None
+    hospital_scope_mode: HospitalScopeMode = "single"
     host_session_id: str | None = None
     accessible_hospital_ids: list[str] | None = None
     can_access_all_hospitals: bool = False

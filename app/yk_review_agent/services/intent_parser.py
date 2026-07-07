@@ -22,6 +22,11 @@ SUPPORTED_METRICS_TEXT = """
 - pgta_mosaic_abnormal: 嵌合、异常结构、异常率、异倍体率、意外发现率
 - pgta_cycle_indicator_overview: 周期无整倍体率、周期整倍体率、仅1个整倍体、>=2个整倍体
 - pgta_special_cnv_overview: 1Mb~4Mb、4Mb~10Mb、>=10Mb 特殊 CNV 提示、拟常染色体区域异常
+- pgtsr_total_volume: PGT-SR 送检量、周期数、胚胎数、平均每周期胚胎数
+- pgtsr_quality_overview: PGT-SR 质控情况、检测成功率、PASS/INFO/FAIL、NA
+- pgtsr_result_overview: PGT-SR 结果分布、异常、嵌合异常
+- pgtsr_cycle_indicator_overview: PGT-SR 周期结局、不同临床指征周期整倍体类比较
+- pgtsr_next_step_overview: PGT-SR 是否进入下一步易位筛查
 """.strip()
 
 
@@ -90,13 +95,13 @@ class IntentParserService:
             output_type=ParsedIntent,
             instructions=(
                 "你是医院客户数据回顾助手的意图识别器。"
-                "当前系统使用业务快照文件作为数据源，真实执行主链路当前只支持 PGT-A 统计问题。"
+                "当前系统使用业务快照文件作为数据源，真实执行主链路当前支持 PGT-A 和 PGT-SR 第一阶段统计问题。"
                 f"可支持的 metric_id 只有以下几个：\n{SUPPORTED_METRICS_TEXT}\n"
-                "如果问题涉及 PGT-SR、PGT-M、全产品汇总、临床指征、流产、种植失败，"
+                "如果问题涉及 PGT-M、全产品汇总、MaReCs 第二阶段、临床精细解释、流产、种植失败，"
                 "必须返回 unsupported_reason，且 metric_id 置空。"
                 "如果用户问题和医院PGT数据分析无关，例如天气、闲聊、通用知识，也必须拒答。"
                 "time_range 要尽量保留用户原话中的时间表达；如果原话没有时间，就使用当前会话时间范围或当前快照全部时间。"
-                "breakdown 只能从 overall/month/quarter/day/age/result/qc 中选择。"
+                "breakdown 只能从 overall/month/quarter/day/age/result/qc/sr_clinical_type 中选择。"
                 "focus 只能表达 summary/trend/rate/distribution。"
                 "不要发散分析，不要补充不存在的产品范围。"
             ),
@@ -161,6 +166,8 @@ class IntentParserService:
             has_explicit_time_range=parsed.has_explicit_time_range,
             has_explicit_product_scope=parsed.has_explicit_product_scope,
             age_range=parsed.age_range,
+            age_scope=parsed.age_scope,
+            sr_clinical_type=parsed.sr_clinical_type,
             has_explicit_age_range=parsed.has_explicit_age_range,
             has_explicit_hospital_scope=parsed.has_explicit_hospital_scope,
             requested_hospital_id=parsed.requested_hospital_id,
@@ -172,7 +179,16 @@ class IntentParserService:
                 "hospital_name": hospital_name or hospital_id,
                 "breakdown": breakdown,
                 "focus": focus,
-                **({"age_range": parsed.age_range} if parsed.age_range else {}),
+                **(
+                    {"patient_age_range": parsed.age_range}
+                    if parsed.age_range and parsed.age_scope == "patient"
+                    else {"spouse_age_range": parsed.age_range}
+                    if parsed.age_range and parsed.age_scope == "spouse"
+                    else {"age_range": parsed.age_range}
+                    if parsed.age_range
+                    else {}
+                ),
+                **({"sr_clinical_type": parsed.sr_clinical_type} if parsed.sr_clinical_type else {}),
             },
             unsupported_reason=parsed.unsupported_reason,
         )
@@ -181,9 +197,11 @@ class IntentParserService:
         business_request = business_request_service.parse(message)
         explicit_time_range = self._extract_time_range(message)
         age_range = self._extract_age_range(message)
+        age_scope = self._extract_age_scope(message)
+        sr_clinical_type = self._extract_sr_clinical_type(message)
         requested_hospital_id = question_normalizer.extract_explicit_hospital(message)
         time_range = explicit_time_range or context.time_range or "当前快照全部时间"
-        breakdown = self._infer_breakdown(message, age_range)
+        breakdown = self._infer_breakdown(message, age_range, sr_clinical_type)
         focus = self._infer_focus(message)
         topic = "结构化业务统计请求" if business_request.request_kind == "structured_business_request" else self._topic_for("", breakdown, focus)
 
@@ -192,7 +210,7 @@ class IntentParserService:
             topic=topic,
             metric_id="",
             time_range=time_range,
-            product_scope=self._infer_product_scope(message),
+            product_scope=self._infer_product_scope(message, context.product_scope),
             breakdown=breakdown,
             focus=focus,
             candidate_metric_ids=[],
@@ -202,6 +220,8 @@ class IntentParserService:
             has_explicit_time_range=bool(explicit_time_range),
             has_explicit_product_scope=business_request_service.has_explicit_product_scope(message),
             age_range=age_range,
+            age_scope=age_scope,
+            sr_clinical_type=sr_clinical_type,
             has_explicit_age_range=age_range is not None,
             has_explicit_hospital_scope=requested_hospital_id is not None,
             requested_hospital_id=requested_hospital_id,
@@ -236,6 +256,14 @@ class IntentParserService:
             message,
         ):
             return re.sub(r"\s+", "", month_range.group(0))
+        if same_year_month_range := re.search(
+            r"(20\d{2})\s*年\s*([1-9]|1[0-2])\s*月\s*(?:到|至|-|~)\s*([1-9]|1[0-2])\s*月",
+            message,
+        ):
+            year = same_year_month_range.group(1)
+            start_month = same_year_month_range.group(2)
+            end_month = same_year_month_range.group(3)
+            return f"{year}年{start_month}月到{year}年{end_month}月"
         if full_date := re.search(r"(20\d{2}\s*年\s*)?([1-9]|1[0-2])\s*月\s*([1-9]|[12]\d|3[01])\s*[日号]", message):
             return full_date.group(0)
         if iso_date := re.search(r"(20\d{2})[-/](0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])", message):
@@ -261,7 +289,13 @@ class IntentParserService:
             return f"20{short_year_only.group(1)}年"
         return None
 
-    def _infer_breakdown(self, message: str, age_range: str | None) -> str:
+    def _infer_breakdown(self, message: str, age_range: str | None, sr_clinical_type: str | None) -> str:
+        if any(keyword in message.lower() for keyword in ("按临床指征", "不同sr患者", "不同患者")):
+            return "sr_clinical_type"
+        if sum(1 for term in ("罗氏易位", "平衡易位", "倒位", "微缺微重", "正常/嵌合/多态", "两种适应症", "插入") if term in message) >= 2:
+            return "sr_clinical_type"
+        if sr_clinical_type and any(keyword in message for keyword in ("罗氏易位", "平衡易位", "倒位")):
+            return "sr_clinical_type"
         if "年龄分层" in message or ("按年龄" in message and age_range is None):
             return "age"
         if re.search(r"(20\d{2}年)?([1-9]|1[0-2])月([1-9]|[12]\d|3[01])[日号]", message):
@@ -307,8 +341,8 @@ class IntentParserService:
             return "rate"
         return "summary"
 
-    def _infer_product_scope(self, message: str) -> str:
-        if any(keyword in message for keyword in ("PGT-SR", "PGTSR")):
+    def _infer_product_scope(self, message: str, fallback_product_scope: str | None = None) -> str:
+        if any(keyword in message for keyword in ("PGT-SR", "PGTSR")) or re.search(r"\bSR\b", message, re.IGNORECASE):
             return "PGT-SR"
         if any(keyword in message for keyword in ("PGT-M", "PGTM")):
             return "PGT-M"
@@ -316,7 +350,7 @@ class IntentParserService:
             return "PGT-AH"
         if any(keyword in message for keyword in ("全产品", "总体")):
             return "ALL"
-        return "PGT-A"
+        return fallback_product_scope or "PGT-A"
 
     def _extract_age_range(self, message: str) -> str | None:
         if "未填写年龄" in message:
@@ -338,6 +372,28 @@ class IntentParserService:
             return f"lt:{lt.group(1)}"
         return None
 
+    def _extract_age_scope(self, message: str) -> str | None:
+        if any(term in message for term in ("配偶年龄", "男方年龄", "女方配偶年龄")):
+            return "spouse"
+        if any(term in message for term in ("受检人年龄", "患者年龄", "女方年龄")):
+            return "patient"
+        return None
+
+    def _extract_sr_clinical_type(self, message: str) -> str | None:
+        candidates = (
+            "平衡易位",
+            "罗氏易位",
+            "倒位",
+            "微缺微重",
+            "正常/嵌合/多态",
+            "两种适应症",
+            "插入",
+        )
+        matched = [candidate for candidate in candidates if candidate in message]
+        if len(matched) == 1:
+            return matched[0]
+        return None
+
     def _topic_for(self, metric_id: str, breakdown: str, focus: str) -> str:
         mapping = {
             "pgt_total_volume": "PGT-A 送检量",
@@ -346,9 +402,16 @@ class IntentParserService:
             "pgta_mosaic_abnormal": "PGT-A 嵌合与异常结构",
             "pgta_cycle_indicator_overview": "PGT-A 周期结局总览",
             "pgta_special_cnv_overview": "PGT-A 特殊 CNV 提示总览",
+            "pgtsr_total_volume": "PGT-SR 送检量",
+            "pgtsr_quality_overview": "PGT-SR 检测与质控总览",
+            "pgtsr_result_overview": "PGT-SR 结果分布",
+            "pgtsr_cycle_indicator_overview": "PGT-SR 周期结局总览",
+            "pgtsr_next_step_overview": "PGT-SR 下一步易位筛查总览",
         }
         if metric_id:
             return mapping.get(metric_id, "未识别问题")
+        if breakdown == "sr_clinical_type":
+            return "PGT-SR 临床指征分组分析"
         if breakdown == "age":
             return "PGT-A 年龄分层分析"
         if breakdown == "qc":

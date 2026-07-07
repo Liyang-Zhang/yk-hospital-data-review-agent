@@ -7,10 +7,14 @@ from statistics import mean
 
 from yk_review_agent.services.pgta_detail_dataset import DetailRecord
 from yk_review_agent.services.pgta_record_source import get_pgta_record_source
+from yk_review_agent.services.pgtsr_record_source import get_pgtsr_record_source
+from yk_review_agent.services.pgtsr_sqlite import PGTSRRecord
 
 
 class QueryService:
     def run(self, metric_id: str, filters: dict[str, str]) -> dict:
+        if metric_id.startswith("pgtsr_"):
+            return self._run_pgtsr(metric_id, filters)
         dataset = get_pgta_record_source()
         time_filter = _parse_time_filter(filters.get("time_range", ""))
         breakdown = filters.get("breakdown", "overall")
@@ -58,6 +62,48 @@ class QueryService:
         if metric_id == "pgta_special_cnv_overview":
             return self._pgta_special_cnv_overview(records, filters, breakdown)
         return self._pgta_volume(records, filters, breakdown)
+
+    def _run_pgtsr(self, metric_id: str, filters: dict[str, str]) -> dict:
+        dataset = get_pgtsr_record_source()
+        time_filter = _parse_time_filter(filters.get("time_range", ""))
+        breakdown = filters.get("breakdown", "overall")
+        records = dataset.filter_records(
+            hospital_id=filters.get("hospital_id"),
+            year=time_filter["year"],
+            quarter=time_filter["quarter"],
+            month=time_filter["month"],
+            day=time_filter["day"],
+            end_year=time_filter["end_year"],
+            end_month=time_filter["end_month"],
+            start_day=time_filter["start_day"],
+            end_day=time_filter["end_day"],
+            patient_age_range=filters.get("patient_age_range"),
+            spouse_age_range=filters.get("spouse_age_range"),
+            sr_clinical_type=filters.get("sr_clinical_type"),
+        )
+        if not records:
+            return {
+                "metric_id": metric_id,
+                "filters": filters,
+                "summary": "当前筛选条件下没有可用的 PGT-SR 快照数据。",
+                "evidence": {"status": "no_data", "record_count": 0, "breakdown": breakdown},
+                "table": {
+                    "title": "无数据",
+                    "columns": ["筛选项", "值"],
+                    "rows": [["time_range", filters.get("time_range", "当前快照全部时间")]],
+                },
+                "chart": None,
+            }
+
+        if metric_id == "pgtsr_quality_overview":
+            return self._pgtsr_quality_overview(records, filters, breakdown)
+        if metric_id == "pgtsr_result_overview":
+            return self._pgtsr_result_overview(records, filters, breakdown)
+        if metric_id == "pgtsr_cycle_indicator_overview":
+            return self._pgtsr_cycle_indicator_overview(records, filters, breakdown)
+        if metric_id == "pgtsr_next_step_overview":
+            return self._pgtsr_next_step_overview(records, filters, breakdown)
+        return self._pgtsr_volume(records, filters, breakdown)
 
     def _pgta_volume(self, records: list[DetailRecord], filters: dict[str, str], breakdown: str) -> dict:
         cycle_count = len({item.cycle_id for item in records})
@@ -453,6 +499,224 @@ class QueryService:
             "chart": None,
         }
 
+    def _pgtsr_volume(self, records: list[PGTSRRecord], filters: dict[str, str], breakdown: str) -> dict:
+        cycle_count = len({item.cycle_id for item in records})
+        embryo_count = len(records)
+        avg_embryos = embryo_count / cycle_count if cycle_count else 0.0
+        grouped = _group_pgtsr_records(records, breakdown if breakdown in {"month", "quarter", "day"} else "overall")
+        rows = []
+        categories: list[str] = []
+        embryo_values: list[float] = []
+        for key, bucket in grouped.items():
+            bucket_cycles = len({item.cycle_id for item in bucket})
+            bucket_embryos = len(bucket)
+            bucket_avg = bucket_embryos / bucket_cycles if bucket_cycles else 0.0
+            rows.append([key, bucket_cycles, bucket_embryos, f"{bucket_avg:.2f}"])
+            if breakdown != "overall":
+                categories.append(key)
+                embryo_values.append(float(bucket_embryos))
+        chart = None
+        if categories:
+            chart = {
+                "title": "PGT-SR 检测胚胎数",
+                "chart_type": "bar",
+                "categories": categories,
+                "series": [{"name": "检测胚胎数", "values": embryo_values}],
+            }
+        return {
+            "metric_id": "pgtsr_total_volume",
+            "filters": filters,
+            "summary": f"当前快照下，PGT-SR 共覆盖 {cycle_count} 个检测周期、{embryo_count} 个检测胚胎，平均每周期 {avg_embryos:.2f} 个胚胎。",
+            "evidence": {"status": "ready", "record_count": embryo_count, "cycle_count": cycle_count, "breakdown": breakdown},
+            "table": {
+                "title": "PGT-SR 送检量总览" if breakdown == "overall" else f"按{self._breakdown_label(breakdown)}统计的 PGT-SR 送检量",
+                "columns": [self._breakdown_label(breakdown), "检测周期数", "检测胚胎数", "平均每周期胚胎数"],
+                "rows": rows,
+            },
+            "chart": chart,
+        }
+
+    def _pgtsr_quality_overview(self, records: list[PGTSRRecord], filters: dict[str, str], breakdown: str) -> dict:
+        total = len(records)
+        cycle_count = len({item.cycle_id for item in records})
+        detection_success_count = sum(1 for item in records if item.has_main_cnv_result)
+        na_count = sum(1 for item in records if item.is_qc_fail)
+        pass_count = sum(1 for item in records if item.qc_conclusion == "PASS")
+        info_count = sum(1 for item in records if item.qc_conclusion == "INFO")
+        fail_count = sum(1 for item in records if item.qc_conclusion == "FAIL")
+        detection_success_rate = _pct(detection_success_count, total)
+        avg_per_cycle = total / cycle_count if cycle_count else 0.0
+        if breakdown == "qc":
+            rows = [["PASS", pass_count, _pct(pass_count, total)], ["INFO", info_count, _pct(info_count, total)], ["FAIL", fail_count, _pct(fail_count, total)]]
+            chart = {
+                "title": "PGT-SR 质控结论分布",
+                "chart_type": "bar",
+                "categories": ["PASS", "INFO", "FAIL"],
+                "series": [{"name": "样本数", "values": [float(pass_count), float(info_count), float(fail_count)]}],
+            }
+            table = {"title": "PGT-SR 质控结论分布", "columns": ["质控结论", "样本数", "占比"], "rows": rows}
+        elif breakdown in {"month", "quarter", "day"}:
+            rows = []
+            categories = []
+            success_values = []
+            for key, bucket in _group_pgtsr_records(records, breakdown).items():
+                bucket_cycles = len({item.cycle_id for item in bucket})
+                bucket_total = len(bucket)
+                bucket_success = sum(1 for item in bucket if item.has_main_cnv_result)
+                bucket_na = sum(1 for item in bucket if item.is_qc_fail)
+                bucket_avg = bucket_total / bucket_cycles if bucket_cycles else 0.0
+                success_rate = _pct_value(bucket_success, bucket_total)
+                rows.append([key, bucket_cycles, bucket_total, bucket_na, f"{success_rate:.1f}%", f"{bucket_avg:.2f}"])
+                categories.append(key)
+                success_values.append(round(success_rate, 1))
+            chart = {
+                "title": "PGT-SR 分时间检测成功率",
+                "chart_type": "bar",
+                "categories": categories,
+                "series": [{"name": "检测成功率", "values": success_values}],
+            }
+            table = {
+                "title": "PGT-SR 分时间检测与质控总览",
+                "columns": [self._breakdown_label(breakdown), "检测周期数", "检测胚胎数", "NA胚胎数", "检测成功率", "平均每周期胚胎数"],
+                "rows": rows,
+            }
+        else:
+            chart = {
+                "title": "PGT-SR 质控结论分布",
+                "chart_type": "bar",
+                "categories": ["PASS", "INFO", "FAIL"],
+                "series": [{"name": "样本数", "values": [float(pass_count), float(info_count), float(fail_count)]}],
+            }
+            table = {
+                "title": "PGT-SR 检测与质控总览",
+                "columns": ["指标", "值"],
+                "rows": [["检测周期数", cycle_count], ["检测胚胎数", total], ["平均每周期胚胎数", f"{avg_per_cycle:.2f}"], ["检测成功率", detection_success_rate], ["NA胚胎数", na_count], ["PASS样本数", pass_count], ["INFO样本数", info_count], ["FAIL样本数", fail_count]],
+            }
+        return {
+            "metric_id": "pgtsr_quality_overview",
+            "filters": filters,
+            "summary": f"当前快照下，PGT-SR 检测周期数为 {cycle_count}，检测胚胎数为 {total}，检测成功率为 {detection_success_rate}，平均每周期胚胎数为 {avg_per_cycle:.2f}。",
+            "evidence": {"status": "ready", "record_count": total, "cycle_count": cycle_count, "na_count": na_count, "breakdown": breakdown},
+            "table": table,
+            "chart": chart,
+        }
+
+    def _pgtsr_result_overview(self, records: list[PGTSRRecord], filters: dict[str, str], breakdown: str) -> dict:
+        labels = ("未见异常", "嵌合异常", "异常", "质控不合格")
+        if breakdown == "result":
+            rows = []
+            total = len(records)
+            for label in labels:
+                count = sum(1 for item in records if item.result_label == label)
+                rows.append([label, count, _pct(count, total)])
+            chart = {
+                "title": "PGT-SR 结果结构分布",
+                "chart_type": "bar",
+                "categories": [row[0] for row in rows],
+                "series": [{"name": "样本数", "values": [float(row[1]) for row in rows]}],
+            }
+            return {
+                "metric_id": "pgtsr_result_overview",
+                "filters": filters,
+                "summary": "已按主报告结果解释拆分当前 PGT-SR 胚胎结果结构。",
+                "evidence": {"status": "ready", "record_count": total, "breakdown": breakdown},
+                "table": {"title": "PGT-SR 结果结构分布", "columns": ["结果类型", "样本数", "占比"], "rows": rows},
+                "chart": chart,
+            }
+        total = len(records)
+        rows = []
+        for label in labels:
+            count = sum(1 for item in records if item.result_label == label)
+            rows.append([label, count, _pct(count, total)])
+        chart = {
+            "title": "PGT-SR 结果指标总览",
+            "chart_type": "bar",
+            "categories": [row[0] for row in rows],
+            "series": [{"name": "占比", "values": [_ratio_value(row[2]) for row in rows]}],
+        }
+        return {
+            "metric_id": "pgtsr_result_overview",
+            "filters": filters,
+            "summary": f"当前快照下，PGT-SR 未见异常占比为 {rows[0][2]}，嵌合异常占比为 {rows[1][2]}，异常占比为 {rows[2][2]}。",
+            "evidence": {"status": "ready", "record_count": total, "breakdown": breakdown},
+            "table": {"title": "PGT-SR 结果指标总览", "columns": ["指标", "样本数", "占比"], "rows": rows},
+            "chart": chart,
+        }
+
+    def _pgtsr_cycle_indicator_overview(self, records: list[PGTSRRecord], filters: dict[str, str], breakdown: str) -> dict:
+        group_breakdown = breakdown if breakdown in {"month", "quarter", "sr_clinical_type"} else "overall"
+        grouped = _group_pgtsr_records(records, group_breakdown)
+        rows = []
+        categories: list[str] = []
+        values: list[float] = []
+        for key, bucket in grouped.items():
+            cycle_ids = {item.cycle_id for item in bucket}
+            total_cycles = len(cycle_ids)
+            cycle_has_normal = {
+                cycle_id: any(item.result_label == "未见异常" for item in bucket if item.cycle_id == cycle_id)
+                for cycle_id in cycle_ids
+            }
+            positive_cycles = sum(1 for matched in cycle_has_normal.values() if matched)
+            negative_cycles = total_cycles - positive_cycles
+            rows.append([key, total_cycles, _pct(positive_cycles, total_cycles), _pct(negative_cycles, total_cycles)])
+            categories.append(key)
+            values.append(round(_pct_value(positive_cycles, total_cycles), 1))
+        chart = None
+        if len(categories) > 1:
+            chart = {
+                "title": "PGT-SR 周期存在未见异常胚胎占比",
+                "chart_type": "bar",
+                "categories": categories,
+                "series": [{"name": "周期存在未见异常胚胎占比", "values": values}],
+            }
+        return {
+            "metric_id": "pgtsr_cycle_indicator_overview",
+            "filters": filters,
+            "summary": f"当前快照下，PGT-SR 共覆盖 {len({item.cycle_id for item in records})} 个检测周期，已统计周期是否存在未见异常胚胎的结局差异。",
+            "evidence": {"status": "ready", "record_count": len(records), "cycle_count": len({item.cycle_id for item in records}), "breakdown": breakdown},
+            "table": {
+                "title": "PGT-SR 周期结局总览",
+                "columns": [self._breakdown_label(group_breakdown), "检测周期数", "周期有未见异常胚胎占比", "周期无未见异常胚胎占比"],
+                "rows": rows,
+            },
+            "chart": chart,
+        }
+
+    def _pgtsr_next_step_overview(self, records: list[PGTSRRecord], filters: dict[str, str], breakdown: str) -> dict:
+        group_breakdown = breakdown if breakdown in {"month", "quarter", "sr_clinical_type"} else "overall"
+        grouped = _group_pgtsr_records(records, group_breakdown)
+        statuses = ["否", "是（评估后符合非遗传型构建）", "是（评估后符合遗传型构建）", "/"]
+        rows = []
+        for key, bucket in grouped.items():
+            cycle_status: dict[str, str] = {}
+            for item in bucket:
+                cycle_status.setdefault(item.cycle_id, item.next_step_screening or "/")
+            total = len(cycle_status)
+            counts = [sum(1 for status in cycle_status.values() if (status or "/") == expected) for expected in statuses]
+            rows.append([key, total, *counts])
+        chart = {
+            "title": "PGT-SR 下一步易位筛查分布",
+            "chart_type": "bar",
+            "categories": [row[0] for row in rows],
+            "series": [
+                {"name": "否", "values": [float(row[2]) for row in rows]},
+                {"name": "是（评估后符合非遗传型构建）", "values": [float(row[3]) for row in rows]},
+                {"name": "是（评估后符合遗传型构建）", "values": [float(row[4]) for row in rows]},
+            ],
+        } if len(rows) > 0 else None
+        return {
+            "metric_id": "pgtsr_next_step_overview",
+            "filters": filters,
+            "summary": "已统计当前 PGT-SR 周期是否进入下一步易位筛查，以及遗传型/非遗传型构建分布。",
+            "evidence": {"status": "ready", "record_count": len(records), "cycle_count": len({item.cycle_id for item in records}), "breakdown": breakdown},
+            "table": {
+                "title": "PGT-SR 下一步易位筛查总览",
+                "columns": [self._breakdown_label(group_breakdown), "检测周期数", "否", "是（评估后符合非遗传型构建）", "是（评估后符合遗传型构建）", "/"],
+                "rows": rows,
+            },
+            "chart": chart,
+        }
+
     def _euploid_rate_rows(
         self,
         records: list[DetailRecord],
@@ -481,6 +745,7 @@ class QueryService:
             "age": "年龄段",
             "result": "结果类型",
             "qc": "质控类型",
+            "sr_clinical_type": "临床指征",
         }
         return mapping.get(breakdown, "维度")
 
@@ -531,6 +796,27 @@ def _group_records(records: list[DetailRecord], breakdown: str) -> dict[str, lis
     return dict(sorted(grouped.items(), key=lambda pair: pair[0]))
 
 
+def _group_pgtsr_records(records: list[PGTSRRecord], breakdown: str) -> dict[str, list[PGTSRRecord]]:
+    grouped: dict[str, list[PGTSRRecord]] = defaultdict(list)
+    if breakdown == "overall":
+        return {"总体": records}
+    for item in records:
+        if breakdown == "quarter":
+            year, month = _pgtsr_month_bucket_parts(item)
+            key = f"{year}Q{((month - 1) // 3 + 1)}"
+        elif breakdown == "day":
+            key = item.created_at.strftime("%Y-%m-%d")
+        elif breakdown == "month":
+            year, month = _pgtsr_month_bucket_parts(item)
+            key = f"{year}-{month:02d}"
+        elif breakdown == "sr_clinical_type":
+            key = item.sr_clinical_type or "未填写"
+        else:
+            key = "总体"
+        grouped[key].append(item)
+    return dict(sorted(grouped.items(), key=lambda pair: pair[0]))
+
+
 def _bucket_key(item: DetailRecord, breakdown: str) -> str:
     if breakdown == "quarter":
         year, month = _month_bucket_parts(item)
@@ -546,6 +832,17 @@ def _bucket_key(item: DetailRecord, breakdown: str) -> str:
 
 
 def _month_bucket_parts(item: DetailRecord) -> tuple[int, int]:
+    text = item.month_bucket.strip()
+    for fmt in ("%Y-%m", "%Y/%m", "%Y年%m月"):
+        try:
+            parsed = datetime.strptime(text, fmt)
+            return parsed.year, parsed.month
+        except ValueError:
+            continue
+    return item.created_at.year, item.created_at.month
+
+
+def _pgtsr_month_bucket_parts(item: PGTSRRecord) -> tuple[int, int]:
     text = item.month_bucket.strip()
     for fmt in ("%Y-%m", "%Y/%m", "%Y年%m月"):
         try:
@@ -578,6 +875,16 @@ def _parse_time_filter(text: str) -> dict[str, int | date | None]:
         result["month"] = int(month_range.group(2))
         result["end_year"] = int(month_range.group(3))
         result["end_month"] = int(month_range.group(4))
+        return result
+    same_year_month_range = re.search(
+        r"(20\d{2})年([1-9]|1[0-2])月(?:到|至|-|~)([1-9]|1[0-2])月",
+        text,
+    )
+    if same_year_month_range:
+        result["year"] = int(same_year_month_range.group(1))
+        result["month"] = int(same_year_month_range.group(2))
+        result["end_year"] = int(same_year_month_range.group(1))
+        result["end_month"] = int(same_year_month_range.group(3))
         return result
     iso_match = re.search(r"(20\d{2})[-/](0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])", text)
     if iso_match:

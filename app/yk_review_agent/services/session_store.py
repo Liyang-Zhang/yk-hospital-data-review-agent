@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from yk_review_agent.models.session import SessionCreateRequest, SessionMessage, SessionRecord
+from yk_review_agent.models.session import SessionContext, SessionCreateRequest, SessionMessage, SessionRecord
 from yk_review_agent.services.snapshot_service import snapshot_service
 
 
@@ -18,9 +18,18 @@ class InMemorySessionStore:
             session_id=session_id,
             user_id=payload.user_id,
             hospital_id=payload.hospital_id,
-            hospital_name=hospital_name,
+            hospital_name="全部医院" if payload.hospital_scope_mode == "all" else hospital_name,
+            hospital_scope_mode=payload.hospital_scope_mode,
+            accessible_hospital_ids=payload.accessible_hospital_ids,
+            can_access_all_hospitals=payload.can_access_all_hospitals,
             host_session_id=payload.host_session_id,
-            overview=snapshot_service.build_session_overview(payload.hospital_id, hospital_name),
+            overview=snapshot_service.build_session_overview(
+                payload.hospital_id,
+                hospital_name,
+                product_scope=payload.product_scope,
+                hospital_scope_mode=payload.hospital_scope_mode,
+            ),
+            context=SessionContext(product_scope=payload.product_scope, hospital_scope_mode=payload.hospital_scope_mode),
         )
         self._sessions[session_id] = record
         return record

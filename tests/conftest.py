@@ -8,6 +8,8 @@ from yk_review_agent.core.config import settings
 from yk_review_agent.services.intent_parser import intent_parser_service
 from yk_review_agent.services.pgta_record_source import clear_pgta_record_source_cache
 from yk_review_agent.services.pgta_sqlite import PGTAExcelImporter, PGTASourceConfig
+from yk_review_agent.services.pgtsr_record_source import clear_pgtsr_record_source_cache
+from yk_review_agent.services.pgtsr_sqlite import PGTSRExcelImporter
 from yk_review_agent.services.product_snapshot_registry import get_snapshot_registry
 from yk_review_agent.services.question_normalizer import question_normalizer
 
@@ -47,8 +49,10 @@ def use_trimmed_snapshot_bundle() -> None:
             )
         ],
     ).rebuild()
+    PGTSRExcelImporter(settings.snapshot_db_url).rebuild()
 
     clear_pgta_record_source_cache()
+    clear_pgtsr_record_source_cache()
     get_snapshot_registry.cache_clear()
     question_normalizer._hospital_alias_map = None
     yield
@@ -61,6 +65,7 @@ def use_trimmed_snapshot_bundle() -> None:
     settings.llm_api_key = original_llm_api_key
     intent_parser_service._llm_agent = original_llm_agent
     clear_pgta_record_source_cache()
+    clear_pgtsr_record_source_cache()
     get_snapshot_registry.cache_clear()
     question_normalizer._hospital_alias_map = None
     if snapshot_db_path.exists():

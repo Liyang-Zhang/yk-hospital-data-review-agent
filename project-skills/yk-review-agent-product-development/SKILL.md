@@ -9,6 +9,10 @@ This skill governs product-facing development for the hospital PGT review agent.
 
 ## Fast Start
 
+Local development environment:
+
+- Use the `micromamba` environment named `yk-review-agent` for repo-local commands, tests, and frontend/backend verification unless the current task explicitly requires something else.
+
 Before reading large history, prefer these short project docs in order:
 
 1. `docs/当前产品边界速记.md`

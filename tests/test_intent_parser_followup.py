@@ -164,6 +164,19 @@ def test_clear_single_metric_question_skips_llm_fallback(monkeypatch) -> None:
     assert parsed.age_range == "gt:35"
 
 
+def test_parser_supports_same_year_month_range_without_repeating_year() -> None:
+    parsed = intent_parser_service.parse(
+        message="看一下 2025年7月到10月 PGT-SR 送检量",
+        context=SessionContext(product_scope="PGT-SR"),
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+    )
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.time_range == "2025年7月到2025年10月"
+    assert parsed.metric_id == "pgtsr_total_volume"
+
+
 def test_followup_switches_to_age_breakdown_when_requested() -> None:
     parsed = intent_parser_service.parse(
         message="换成年龄分层",

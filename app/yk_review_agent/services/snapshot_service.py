@@ -7,30 +7,40 @@ from yk_review_agent.models.chat import DataReadinessReport, SnapshotMetadata, S
 from yk_review_agent.models.session import SessionOverview
 from yk_review_agent.services.metric_catalog import active_data_capabilities, get_metric
 from yk_review_agent.services.pgta_record_source import get_pgta_record_source
+from yk_review_agent.services.pgtsr_record_source import get_pgtsr_record_source
 from yk_review_agent.services.product_snapshot_registry import get_snapshot_registry
 
 
 SNAPSHOT_LIMITATIONS = [
     "当前仍依赖业务人工整合的 Excel 快照，不是正式接口直连。",
-    "当前已接入 PGT-A、PGT-AH、PGT-SR、PGT-M 快照，但真实执行主链路仍只覆盖 PGT-A。",
+    "当前已接入 PGT-A、PGT-AH、PGT-SR、PGT-M 快照；真实执行主链路当前支持 PGT-A 与 PGT-SR 第一阶段指标。",
     "跨产品执行仍处于能力矩阵阶段；PGT-A 的部分结果类指标已可执行，但扩增成功率口径仍待进一步对齐。",
 ]
 
 
 class SnapshotService:
-    def build_session_overview(self, hospital_id: str, hospital_name: str | None = None) -> SessionOverview:
-        dataset = get_pgta_record_source()
-        records = dataset.filter_records(hospital_id=hospital_id)
+    def build_session_overview(
+        self,
+        hospital_id: str,
+        hospital_name: str | None = None,
+        *,
+        product_scope: str = "PGT-A",
+        hospital_scope_mode: str = "single",
+    ) -> SessionOverview:
+        dataset = self._record_source(product_scope)
+        records = dataset.filter_records(hospital_id=hospital_id if hospital_scope_mode == "single" else None)
         cycle_count = len({item.cycle_id for item in records if item.cycle_id})
         embryo_count = len(records)
         snapshot_start, snapshot_end = self._session_snapshot_range(records, fallback=dataset.stat_month_range)
-        resolved_hospital_name = hospital_name or hospital_id
+        resolved_hospital_name = "全部医院" if hospital_scope_mode == "all" else (hospital_name or hospital_id)
         summary = (
-            f"当前快照下，{resolved_hospital_name} 已接入 {embryo_count} 个可分析胚胎样本，"
+            f"当前快照下，{resolved_hospital_name} 已接入 {embryo_count} 个可分析 {product_scope} 胚胎样本，"
             f"覆盖 {cycle_count} 个周期，时间范围 {snapshot_start} 至 {snapshot_end}。"
         )
         return SessionOverview(
             hospital_name=resolved_hospital_name,
+            product_scope=product_scope,
+            hospital_scope_mode=hospital_scope_mode,  # type: ignore[arg-type]
             snapshot_start=snapshot_start,
             snapshot_end=snapshot_end,
             embryo_count=embryo_count,
@@ -39,13 +49,16 @@ class SnapshotService:
         )
 
     def get_snapshot_metadata(self) -> SnapshotMetadata:
-        dataset = get_pgta_record_source()
+        return self.get_snapshot_metadata_for_product("PGT-A")
+
+    def get_snapshot_metadata_for_product(self, product_scope: str) -> SnapshotMetadata:
+        dataset = self._record_source(product_scope)
         start, end = dataset.stat_month_range
         registry = get_snapshot_registry()
         profiles = registry.list_profiles()
         return SnapshotMetadata(
             data_source="business_snapshot_bundle",
-            product_scope="PGT-A（可执行） / PGT-AH、PGT-SR、PGT-M（快照已接入）",
+            product_scope=product_scope,
             snapshot_start=start,
             snapshot_end=end,
             hospital_count=len(dataset.hospitals),
@@ -72,6 +85,11 @@ class SnapshotService:
                 "周期",
                 "胚胎",
                 "年龄",
+                "配偶年龄",
+                "受检人核型",
+                "配偶核型",
+                "临床指征",
+                "下一步易位筛查",
                 "检测结果",
                 "结果说明",
                 "质控结果",
@@ -94,7 +112,8 @@ class SnapshotService:
                 limitations=["当前问题未映射到受控指标契约。"],
             )
 
-        missing_fields = [field for field in metric.data_requirements if field not in active_data_capabilities("PGT-A")]
+        product_scope = metric.supported_products[0] if metric.supported_products else "PGT-A"
+        missing_fields = [field for field in metric.data_requirements if field not in active_data_capabilities(product_scope)]
         if missing_fields:
             return DataReadinessReport(
                 status="unsupported",
@@ -103,10 +122,10 @@ class SnapshotService:
                 limitations=["需要补充字段或更换正式数据源后才能执行。"],
             )
 
-        dataset = get_pgta_record_source()
+        dataset = self._record_source(product_scope)
         time_filter = self._parse_time_filter(filters.get("time_range", ""))
-        records = dataset.filter_records(
-            hospital_id=filters.get("hospital_id"),
+        filter_kwargs = dict(
+            hospital_id=filters.get("hospital_id") if filters.get("hospital_scope_mode", "single") == "single" else None,
             year=time_filter["year"],
             quarter=time_filter["quarter"],
             month=time_filter["month"],
@@ -115,12 +134,18 @@ class SnapshotService:
             end_month=time_filter["end_month"],
             start_day=time_filter["start_day"],
             end_day=time_filter["end_day"],
-            age_range=filters.get("age_range"),
         )
+        if product_scope == "PGT-SR":
+            filter_kwargs["patient_age_range"] = filters.get("patient_age_range")
+            filter_kwargs["spouse_age_range"] = filters.get("spouse_age_range")
+            filter_kwargs["sr_clinical_type"] = filters.get("sr_clinical_type")
+        else:
+            filter_kwargs["age_range"] = filters.get("age_range")
+        records = dataset.filter_records(**filter_kwargs)
         if not records:
             return DataReadinessReport(
                 status="no_data",
-                summary="当前快照在所选医院和时间范围内没有可用于执行该统计的 PGT-A 数据。",
+                summary=f"当前快照在所选医院和时间范围内没有可用于执行该统计的 {product_scope} 数据。",
                 record_count=0,
                 limitations=["当前问题可执行，但本次筛选命中为空。"],
             )
@@ -130,6 +155,11 @@ class SnapshotService:
             summary=f"当前快照可执行“{metric.title}”，并已命中 {len(records)} 条有效胚胎记录。",
             record_count=len(records),
         )
+
+    def _record_source(self, product_scope: str):
+        if product_scope == "PGT-SR":
+            return get_pgtsr_record_source()
+        return get_pgta_record_source()
 
     def _session_snapshot_range(self, records: list, fallback: tuple[str, str]) -> tuple[str, str]:
         if not records:
@@ -164,6 +194,16 @@ class SnapshotService:
             result["month"] = int(month_range.group(2))
             result["end_year"] = int(month_range.group(3))
             result["end_month"] = int(month_range.group(4))
+            return result
+        same_year_month_range = re.search(
+            r"(20\d{2})年([1-9]|1[0-2])月(?:到|至|-|~)([1-9]|1[0-2])月",
+            text,
+        )
+        if same_year_month_range:
+            result["year"] = int(same_year_month_range.group(1))
+            result["month"] = int(same_year_month_range.group(2))
+            result["end_year"] = int(same_year_month_range.group(1))
+            result["end_month"] = int(same_year_month_range.group(3))
             return result
         iso_match = re.search(r"(20\d{2})[-/](0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])", text)
         if iso_match:

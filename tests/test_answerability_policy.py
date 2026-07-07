@@ -12,6 +12,7 @@ def _evaluate(
     *,
     hospital_id: str = HOSPITAL_ID,
     hospital_name: str | None = None,
+    hospital_scope_mode: str = "single",
     accessible_hospital_ids: list[str] | None = None,
     can_access_all_hospitals: bool = False,
 ):
@@ -27,6 +28,7 @@ def _evaluate(
         parsed=parsed,
         hospital_id=hospital_id,
         hospital_name=resolved_hospital_name,
+        hospital_scope_mode=hospital_scope_mode,
         accessible_hospital_ids=accessible_hospital_ids,
         can_access_all_hospitals=can_access_all_hospitals,
     )
@@ -500,4 +502,71 @@ def test_structured_business_request_is_detected_and_refused_with_matrix() -> No
     assert plan.answer_mode == "refuse"
     assert "结构化业务统计任务单" in plan.rationale
     assert any("PGT-A 当前可支撑" in line for line in plan.warnings)
-    assert any("PGT-SR（含 MARECS） 当前不支撑" in line for line in plan.warnings)
+    assert any("PGT-SR（含 MARECS） 当前可支撑" in line for line in plan.warnings)
+
+
+def test_pgtsr_volume_answers() -> None:
+    message = "2025年 PGT-SR 送检量"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-SR"
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_total_volume"
+
+
+def test_pgtsr_next_step_answers() -> None:
+    message = "看一下 PGT-SR 是否进入下一步易位筛查"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-SR"
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_next_step_overview"
+
+
+def test_pgtsr_cycle_indicator_by_clinical_type_answers() -> None:
+    message = "罗氏易位、平衡易位、倒位等不同 SR 患者的周期整倍体率"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.breakdown == "sr_clinical_type"
+    assert parsed.sr_clinical_type is None
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_cycle_indicator_overview"
+    assert "sr_clinical_type" not in plan.filters
+
+
+def test_pgtsr_marecs_stage2_refuses() -> None:
+    message = "看一下 PGT-SR MaReCs 第二阶段不携带率"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-SR"
+    assert plan.answer_mode == "refuse"
+    assert "MaReCs 第二阶段" in plan.rationale
+
+
+def test_all_hospitals_scope_answers_without_hospital_filter() -> None:
+    parsed, plan = _evaluate(
+        "2025年 PGT-SR 送检量",
+        hospital_id="__ALL_HOSPITALS__",
+        hospital_name="全部医院",
+        hospital_scope_mode="all",
+        can_access_all_hospitals=True,
+    )
+
+    assert parsed.product_scope == "PGT-SR"
+    assert plan.answer_mode == "answer"
+    assert plan.filters["hospital_scope_mode"] == "all"
+    assert "hospital_id" not in plan.filters
+
+
+def test_all_hospitals_scope_requires_permission() -> None:
+    _, plan = _evaluate(
+        "2025年 PGT-A 送检量",
+        hospital_id="__ALL_HOSPITALS__",
+        hospital_name="全部医院",
+        hospital_scope_mode="all",
+        can_access_all_hospitals=False,
+    )
+
+    assert plan.answer_mode == "refuse"
+    assert "全部医院的数据权限" in plan.rationale

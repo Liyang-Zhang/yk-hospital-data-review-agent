@@ -51,10 +51,19 @@ class FunctionResolver:
         )
 
     def _match_score(self, *, metric: MetricDefinition, message: str, parsed: ParsedIntent) -> int:
+        if parsed.product_scope and parsed.product_scope != "ALL" and parsed.product_scope not in metric.supported_products:
+            return 0
         score = 0
         if metric.metric_id == "pgta_cycle_indicator_overview":
             score += self._term_score(message, metric.hard_terms, hard=True)
             score += self._term_score(message, metric.soft_terms, hard=False)
+            return score
+
+        if metric.metric_id == "pgtsr_cycle_indicator_overview":
+            score += self._term_score(message, metric.hard_terms, hard=True)
+            score += self._term_score(message, metric.soft_terms, hard=False)
+            if parsed.breakdown == "sr_clinical_type" and score > 0:
+                score += 5
             return score
 
         if metric.metric_id == "pgta_special_cnv_overview":
@@ -117,6 +126,8 @@ class FunctionResolver:
     ) -> list[str]:
         quality_metric_ids = {"pgta_quality_overview"}
         volume_metric_ids = {"pgt_total_volume"}
+        sr_quality_metric_ids = {"pgtsr_quality_overview"}
+        sr_volume_metric_ids = {"pgtsr_total_volume"}
 
         if quality_metric_ids.intersection(candidate_metric_ids) and volume_metric_ids.intersection(candidate_metric_ids):
             if self._contains_any(
@@ -139,6 +150,29 @@ class FunctionResolver:
                     metric_id
                     for metric_id in candidate_metric_ids
                     if metric_id == "pgta_quality_overview"
+                ]
+
+        if sr_quality_metric_ids.intersection(candidate_metric_ids) and sr_volume_metric_ids.intersection(candidate_metric_ids):
+            if self._contains_any(
+                message,
+                (
+                    "检测成功率",
+                    "扩增成功率",
+                    "检测周期数",
+                    "检测胚胎数",
+                    "平均囊胚数",
+                    "na率",
+                    "na数",
+                    "质控",
+                    "pass",
+                    "fail",
+                    "info",
+                ),
+            ):
+                return [
+                    metric_id
+                    for metric_id in candidate_metric_ids
+                    if metric_id == "pgtsr_quality_overview"
                 ]
 
         if "pgta_cycle_indicator_overview" in candidate_metric_ids:
@@ -177,6 +211,46 @@ class FunctionResolver:
                 for metric_id in candidate_metric_ids
                 if metric_id not in {"pgta_euploid_rate", "pgt_total_volume"}
             ]
+        if "pgtsr_cycle_indicator_overview" in candidate_metric_ids:
+            if "pgtsr_total_volume" in candidate_metric_ids and self._contains_any(
+                message,
+                (
+                    "平均每周期胚胎数",
+                    "每周期胚胎数",
+                    "平均每周期囊胚数",
+                ),
+            ):
+                return [
+                    metric_id
+                    for metric_id in candidate_metric_ids
+                    if metric_id != "pgtsr_cycle_indicator_overview"
+                ]
+            if self._contains_any(
+                message,
+                (
+                    "周期维度",
+                    "周期层面",
+                    "从周期角度",
+                    "按周期看",
+                    "整体结局",
+                    "周期结局",
+                    "周期整倍体",
+                    "按临床指征",
+                    "罗氏易位",
+                    "平衡易位",
+                    "倒位",
+                ),
+            ):
+                return [
+                    metric_id
+                    for metric_id in candidate_metric_ids
+                    if metric_id == "pgtsr_cycle_indicator_overview"
+                ]
+            return [
+                metric_id
+                for metric_id in candidate_metric_ids
+                if metric_id not in {"pgtsr_total_volume", "pgtsr_result_overview"}
+            ]
         if {
             "pgta_special_cnv_overview",
             "pgta_mosaic_abnormal",
@@ -191,6 +265,15 @@ class FunctionResolver:
                 metric_id
                 for metric_id in candidate_metric_ids
                 if metric_id != "pgta_mosaic_abnormal"
+            ]
+        if "pgtsr_next_step_overview" in candidate_metric_ids and self._contains_any(
+            message,
+            ("下一步易位筛查", "是否进入下一步", "遗传型构建", "非遗传型构建"),
+        ):
+            return [
+                metric_id
+                for metric_id in candidate_metric_ids
+                if metric_id == "pgtsr_next_step_overview"
             ]
         return candidate_metric_ids
 

@@ -5,6 +5,7 @@ import { ResultCards } from "./components/ResultCards";
 import { UserResultCards } from "./components/UserResultCards";
 import {
   createSession,
+  type DemoAccessMode,
   fetchDemoMetadata,
   sendMessage,
   type ChatResponse,
@@ -19,54 +20,85 @@ type ChatTurn = {
 };
 
 type ViewMode = "user" | "debug";
+type ProductScope = "PGT-A" | "PGT-SR";
+type HospitalScopeMode = "single" | "all";
 
-const promptGroups = [
+const PRODUCT_WORKSPACES: Record<
+  ProductScope,
   {
-    title: "看规模和趋势",
-    description: "适合做月度、季度经营回顾",
-    prompts: [
-      "按季度看一下 2025 年 PGT-A 送检趋势",
-      "看一下 2025 年 7 月到 10 月 PGT-A 送检量",
-      "2025 年 PGT-A 每月整倍体率变化怎么样",
+    promptGroups: Array<{ title: string; description: string; prompts: string[] }>;
+    workflowHints: Array<{ title: string; items: string[] }>;
+    title: string;
+    placeholder: string;
+    objectChoices?: Array<{ kicker: string; title: string; description: string; prompt: string }>;
+  }
+> = {
+  "PGT-A": {
+    title: "PGT-A 数据回顾",
+    placeholder: "直接输入你想回顾的问题，例如：2025 年 PGT-A 的整倍体率怎么样？",
+    promptGroups: [
+      {
+        title: "看规模和趋势",
+        description: "适合做月度、季度经营回顾",
+        prompts: ["按季度看一下 2025 年 PGT-A 送检趋势", "看一下 2025 年 7 月到 10 月 PGT-A 送检量", "2025 年 PGT-A 每月整倍体率变化怎么样"],
+      },
+      {
+        title: "看结果和质量",
+        description: "适合查看结果结构、质控和特殊提示",
+        prompts: ["看一下 2025 年 PGT-A 质控情况", "看一下 PGT-A 结果分布和异常结构", "特殊 CNV 提示这块有多少"],
+      },
+      {
+        title: "看人群和周期",
+        description: "适合按年龄或周期层面拆开看",
+        prompts: ["按年龄分层看一下 PGT-A 整倍体率", "按年龄分层，从周期维度看整体结局", "看一下 PGT-A 的周期无整倍体率"],
+      },
+    ],
+    workflowHints: [
+      { title: "可回答的问题", items: ["送检量", "胚胎整倍体率", "年龄分层", "质控", "结果结构", "周期结局", "特殊 CNV"] },
+      { title: "可以使用的条件", items: ["医院", "时间范围", "年龄范围"] },
+      { title: "当前不支持", items: ["PGT-SR / PGT-M / PGT-AH 真实执行", "全产品汇总", "复杂多指标联合执行", "临床指征类统计"] },
+    ],
+    objectChoices: [
+      { kicker: "输出胚胎数和比例", title: "胚胎整倍体率", description: "适合判断检测胚胎中未见异常的占比。", prompt: "看一下 PGT-A 的胚胎整倍体率" },
+      { kicker: "输出周期结局分布", title: "周期整倍体结局", description: "适合判断每个周期是否有可用整倍体胚胎。", prompt: "看一下 PGT-A 的周期整倍体结局" },
     ],
   },
-  {
-    title: "看结果和质量",
-    description: "适合查看结果结构、质控和特殊提示",
-    prompts: [
-      "看一下 2025 年 PGT-A 质控情况",
-      "看一下 PGT-A 结果分布和异常结构",
-      "特殊 CNV 提示这块有多少",
+  "PGT-SR": {
+    title: "PGT-SR 数据回顾",
+    placeholder: "直接输入你想回顾的问题，例如：看一下 PGT-SR 是否进入下一步易位筛查？",
+    promptGroups: [
+      {
+        title: "看规模和趋势",
+        description: "适合先看医院当前 PGT-SR 盘面",
+        prompts: ["看一下当前快照下的 PGT-SR 送检量", "按季度看一下 2025 年 PGT-SR 送检趋势", "看一下 2025 年 7 月到 10 月 PGT-SR 送检量"],
+      },
+      {
+        title: "看结果和质量",
+        description: "适合查看结果结构和检测质控",
+        prompts: ["看一下 PGT-SR 质控情况", "看一下 PGT-SR 结果分布", "按配偶年龄看一下 PGT-SR 结果分布"],
+      },
+      {
+        title: "看周期和临床类型",
+        description: "适合查看不同 SR 临床类型的周期结局",
+        prompts: ["看一下 PGT-SR 是否进入下一步易位筛查", "按临床指征看一下 PGT-SR 周期结局", "罗氏易位、平衡易位、倒位等不同 SR 患者的周期整倍体率"],
+      },
+    ],
+    workflowHints: [
+      { title: "可回答的问题", items: ["送检量", "质控", "结果分布", "周期结局", "下一步易位筛查", "按临床指征比较周期结局"] },
+      { title: "可以使用的条件", items: ["医院", "时间范围", "受检人年龄", "配偶年龄", "临床指征"] },
+      { title: "当前不支持", items: ["MaReCs 第二阶段", "核型精细解释", "全产品汇总", "复杂多指标联合执行"] },
     ],
   },
-  {
-    title: "看人群和周期",
-    description: "适合按年龄或周期层面拆开看",
-    prompts: [
-      "按年龄分层看一下 PGT-A 整倍体率",
-      "按年龄分层，从周期维度看整体结局",
-      "看一下 PGT-A 的周期无整倍体率",
-    ],
-  },
-];
-
-const workflowHints = [
-  {
-    title: "可回答的问题",
-    items: ["送检量", "胚胎整倍体率", "年龄分层", "质控", "结果结构", "周期结局", "特殊 CNV"],
-  },
-  {
-    title: "可以使用的条件",
-    items: ["医院", "时间范围", "年龄范围"],
-  },
-  {
-    title: "当前不支持",
-    items: ["PGT-SR / PGT-M / PGT-AH 真实执行", "全产品汇总", "复杂多指标联合执行", "临床指征类统计"],
-  },
-];
+};
 
 export function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("user");
+  const [selectedProduct, setSelectedProduct] = useState<ProductScope>("PGT-A");
+  const [accessMode, setAccessMode] = useState<DemoAccessMode>("all");
+  const [hospitalScopeMode, setHospitalScopeMode] = useState<HospitalScopeMode>("single");
+  const [selectedHospitalId, setSelectedHospitalId] = useState<string>("");
+  const [isSwitchingProduct, setIsSwitchingProduct] = useState(false);
+  const currentWorkspace = PRODUCT_WORKSPACES[selectedProduct];
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [metadata, setMetadata] = useState<DemoMetadata | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -76,17 +108,77 @@ export function App() {
   const messageColumnRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    fetchDemoMetadata()
+    let cancelled = false;
+    setIsSwitchingProduct(true);
+    setTurns([]);
+    setInput("");
+    setSession(null);
+    setMetadata(null);
+    setError(null);
+    setSelectedHospitalId("");
+    setHospitalScopeMode("single");
+    fetchDemoMetadata(selectedProduct, accessMode)
       .then((meta) => {
+        if (cancelled) return;
         setMetadata(meta);
         if (!meta.default_hospital) {
           throw new Error("No hospital found in current snapshot bundle");
         }
-        return createSession(meta.default_hospital);
+        setSelectedHospitalId(meta.default_hospital.hospital_id);
       })
-      .then((record) => setSession(record))
-      .catch(() => setError("无法创建会话，请检查后端服务是否已启动。"));
-  }, []);
+      .catch(() => {
+        if (!cancelled) {
+          setError("无法创建会话，请检查后端服务是否已启动。");
+        }
+      })
+    return () => {
+      cancelled = true;
+    };
+  }, [accessMode, selectedProduct]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!metadata || !selectedHospitalId) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const selectedHospital = metadata.hospitals.find((item) => item.hospital_id === selectedHospitalId);
+    if (!selectedHospital) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    setIsSwitchingProduct(true);
+    setSession(null);
+    setTurns([]);
+    createSession({
+      hospital_id: hospitalScopeMode === "all" ? "__ALL_HOSPITALS__" : selectedHospital.hospital_id,
+      hospital_name: hospitalScopeMode === "all" ? "全部医院" : selectedHospital.hospital_name,
+      product_scope: selectedProduct,
+      hospital_scope_mode: hospitalScopeMode,
+      accessible_hospital_ids: metadata.hospitals.map((item) => item.hospital_id),
+      can_access_all_hospitals: metadata.can_access_all_hospitals,
+    })
+      .then((record) => {
+        if (!cancelled) {
+          setSession(record);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError("无法创建会话，请检查后端服务是否已启动。");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsSwitchingProduct(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hospitalScopeMode, metadata, selectedHospitalId, selectedProduct]);
 
   useEffect(() => {
     if (!messageColumnRef.current) {
@@ -111,6 +203,9 @@ export function App() {
       const response = await sendMessage(session.session_id, normalizedPrompt, {
         hospital_id: session.hospital_id,
         hospital_name: session.hospital_name ?? "",
+        hospital_scope_mode: session.hospital_scope_mode,
+        accessible_hospital_ids: metadata?.hospitals.map((item) => item.hospital_id),
+        can_access_all_hospitals: metadata?.can_access_all_hospitals,
       });
       setTurns((current) => [
         ...current,
@@ -143,8 +238,17 @@ export function App() {
         isSubmitting={isSubmitting}
         metadata={metadata}
         onInputChange={setInput}
+        hospitalScopeMode={hospitalScopeMode}
+        isSwitchingProduct={isSwitchingProduct}
+        accessMode={accessMode}
+        onAccessModeChange={setAccessMode}
+        onHospitalChange={setSelectedHospitalId}
+        onHospitalScopeModeChange={setHospitalScopeMode}
         onModeChange={setViewMode}
         onSubmit={onSubmit}
+        productScope={selectedProduct}
+        selectedHospitalId={selectedHospitalId}
+        onProductChange={setSelectedProduct}
         session={session}
         submitPrompt={submitPrompt}
         turns={turns}
@@ -166,7 +270,7 @@ export function App() {
           <section className="sidebar-panel">
             <div className="panel-title">当前场景</div>
             <p className="panel-copy">
-            当前处于快照模式，已接入 PGT-A、PGT-AH、PGT-SR、PGT-M 业务数据文件；当前真实执行链路先聚焦 PGT-A 受控统计问答和结果卡片展示。
+            当前处于快照模式，已接入 PGT-A、PGT-AH、PGT-SR、PGT-M 业务数据文件；当前真实执行链路支持 PGT-A 与 PGT-SR 第一阶段受控统计问答和结果卡片展示。
             </p>
           {metadata ? (
             <p className="panel-copy">
@@ -244,7 +348,7 @@ export function App() {
             先明确主指标，再补时间或年龄条件，系统会更稳定地进入受控统计分析。
           </div>
           <div className="workflow-grid">
-            {workflowHints.map((group) => (
+            {currentWorkspace.workflowHints.map((group) => (
               <div className="workflow-block" key={group.title}>
                 <div className="workflow-block-title">{group.title}</div>
                 <div className="workflow-tag-list">
@@ -261,7 +365,7 @@ export function App() {
 
         <section className="sidebar-panel">
           <div className="panel-title">推荐问法</div>
-          {promptGroups.map((group) => (
+          {currentWorkspace.promptGroups.map((group) => (
             <div className="prompt-group" key={group.title}>
               <div className="prompt-group-title">{group.title}</div>
               <div className="prompt-list">
@@ -305,7 +409,7 @@ export function App() {
                 <div className="empty-state">
                     <div className="empty-title">从一个业务问题开始</div>
                     <p className="empty-copy">
-                      当前快照模式已接入 PGT-A、PGT-AH、PGT-SR、PGT-M 业务文件，当前可直接联调 PGT-A 的送检量、整倍体率、年龄分层、质控结果和异常结构。
+                      当前快照模式已接入 PGT-A、PGT-AH、PGT-SR、PGT-M 业务文件，当前可直接联调 {selectedProduct} 的一阶段受控统计能力。
                     </p>
                   {metadata ? (
                     <div className="empty-guidance">
@@ -399,10 +503,19 @@ type WorkspaceProps = {
   error: string | null;
   input: string;
   isSubmitting: boolean;
+  accessMode: DemoAccessMode;
+  hospitalScopeMode: HospitalScopeMode;
+  isSwitchingProduct: boolean;
   metadata: DemoMetadata | null;
+  onAccessModeChange: (mode: DemoAccessMode) => void;
+  onHospitalChange: (hospitalId: string) => void;
+  onHospitalScopeModeChange: (mode: HospitalScopeMode) => void;
   onInputChange: (value: string) => void;
   onModeChange: (mode: ViewMode) => void;
+  onProductChange: (product: ProductScope) => void;
   onSubmit: (event: FormEvent) => Promise<void>;
+  productScope: ProductScope;
+  selectedHospitalId: string;
   session: SessionRecord | null;
   submitPrompt: (prompt: string) => Promise<void>;
   turns: ChatTurn[];
@@ -412,15 +525,25 @@ function UserWorkspace({
   error,
   input,
   isSubmitting,
+  accessMode,
+  hospitalScopeMode,
+  isSwitchingProduct,
   metadata,
+  onAccessModeChange,
+  onHospitalChange,
+  onHospitalScopeModeChange,
   onInputChange,
   onModeChange,
+  onProductChange,
   onSubmit,
+  productScope,
+  selectedHospitalId,
   session,
   submitPrompt,
   turns,
 }: WorkspaceProps) {
-  const hospitalName = metadata?.default_hospital?.hospital_name ?? session?.hospital_name ?? "当前医院";
+  const workspace = PRODUCT_WORKSPACES[productScope];
+  const hospitalName = session?.hospital_name ?? metadata?.default_hospital?.hospital_name ?? "当前医院";
   const overview = session?.overview ?? null;
   const snapshotRange = overview
     ? `${overview.snapshot_start} 至 ${overview.snapshot_end}`
@@ -429,6 +552,19 @@ function UserWorkspace({
       : "等待快照信息";
   const latestAssistant = [...turns].reverse().find((turn) => turn.role === "assistant" && turn.response);
   const sessionReady = Boolean(session);
+  const isWorkspaceLocked = isSubmitting || isSwitchingProduct || !sessionReady;
+  const sessionStatusText = isSwitchingProduct
+    ? `正在切换到 ${productScope}`
+    : session
+      ? "会话已连接"
+      : "连接中";
+  const [expandedPromptGroups, setExpandedPromptGroups] = useState<Record<string, boolean>>({});
+  const [showObjectChoices, setShowObjectChoices] = useState(false);
+
+  useEffect(() => {
+    setExpandedPromptGroups({});
+    setShowObjectChoices(false);
+  }, [productScope]);
 
   return (
     <div className="user-shell">
@@ -437,11 +573,52 @@ function UserWorkspace({
           <div className="user-brand-mark">YK</div>
           <div>
             <div className="user-brand-title">PGT 数据回顾助手</div>
-            <div className="user-brand-subtitle">{hospitalName}</div>
+            <div className="user-brand-subtitle">受控统计问答</div>
           </div>
         </div>
         <div className="user-topbar-actions">
-          <div className="user-session-pill">{session ? "会话已连接" : "连接中"}</div>
+          <select
+            className="mode-switch-button"
+            disabled={isSwitchingProduct}
+            value={accessMode}
+            onChange={(event) => onAccessModeChange(event.target.value as DemoAccessMode)}
+          >
+            <option value="single">本院账号</option>
+            <option value="all">内部账号</option>
+          </select>
+          <select
+            className="mode-switch-button"
+            disabled={isSwitchingProduct || !metadata?.can_access_all_hospitals}
+            value={hospitalScopeMode}
+            onChange={(event) => onHospitalScopeModeChange(event.target.value as HospitalScopeMode)}
+          >
+            <option value="single">当前医院</option>
+            <option value="all">全部医院</option>
+          </select>
+          {hospitalScopeMode === "single" ? (
+            <select
+              className="mode-switch-button hospital-switch-select"
+              disabled={isSwitchingProduct || !metadata || !metadata.can_access_all_hospitals}
+              value={selectedHospitalId}
+              onChange={(event) => onHospitalChange(event.target.value)}
+            >
+              {metadata?.hospitals.map((hospital) => (
+                <option key={hospital.hospital_id} value={hospital.hospital_id}>
+                  {hospital.hospital_name}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          <select
+            className="mode-switch-button"
+            disabled={isSwitchingProduct}
+            value={productScope}
+            onChange={(event) => onProductChange(event.target.value as ProductScope)}
+          >
+            <option value="PGT-A">PGT-A</option>
+            <option value="PGT-SR">PGT-SR</option>
+          </select>
+          <div className={`user-session-pill${isSwitchingProduct ? " user-session-pill-loading" : ""}`}>{sessionStatusText}</div>
           <button className="mode-switch-button" onClick={() => onModeChange("debug")} type="button">
             研发调试
           </button>
@@ -452,38 +629,49 @@ function UserWorkspace({
         <section className="user-command-panel">
           <div className="user-context-row">
             <div>
-              <div className="user-kicker">当前医院</div>
-              <h1>{hospitalName} PGT-A 数据回顾</h1>
+              <div className="user-kicker">{hospitalScopeMode === "all" ? "全部医院范围" : hospitalName}</div>
+              <h1>{workspace.title}</h1>
             </div>
           </div>
 
           {overview ? <SessionOverviewPanel overview={overview} /> : null}
 
+          {isSwitchingProduct ? (
+            <div className="user-switching-banner" role="status" aria-live="polite">
+              <div className="user-switching-spinner" aria-hidden="true" />
+              <div>
+                <strong>正在切换到 {productScope}</strong>
+                <span>正在重建默认医院、快照范围和当前会话上下文，完成前暂时不能直接提问。</span>
+              </div>
+            </div>
+          ) : null}
+
           <form className="user-composer" onSubmit={onSubmit}>
             <textarea
+              disabled={isWorkspaceLocked}
               value={input}
               onChange={(event) => onInputChange(event.target.value)}
-              placeholder="直接输入你想回顾的问题，例如：2025 年 PGT-A 的整倍体率怎么样？"
-              rows={4}
+              placeholder={workspace.placeholder}
+              rows={3}
             />
             <div className="user-composer-footer">
               <div className="user-composer-hint">支持连续追问，会沿用当前医院和可继承的筛选条件。</div>
-              <button className="user-submit-button" disabled={isSubmitting || !sessionReady} type="submit">
+              <button className="user-submit-button" disabled={isWorkspaceLocked} type="submit">
                 {isSubmitting ? "分析中..." : "开始分析"}
               </button>
             </div>
           </form>
 
           <div className="user-prompt-lanes">
-            {promptGroups.map((group) => (
+            {workspace.promptGroups.map((group) => (
               <div className="user-prompt-lane" key={group.title}>
                 <div className="user-lane-title">{group.title}</div>
                 <p className="user-lane-copy">{group.description}</p>
                 <div className="user-prompt-list">
-                  {group.prompts.map((prompt) => (
+                  {(expandedPromptGroups[group.title] ? group.prompts : group.prompts.slice(0, 2)).map((prompt) => (
                     <button
                       className="user-prompt-chip"
-                      disabled={isSubmitting || !sessionReady}
+                      disabled={isWorkspaceLocked}
                       key={prompt}
                       onClick={() => void submitPrompt(prompt)}
                       type="button"
@@ -491,36 +679,56 @@ function UserWorkspace({
                       {prompt}
                     </button>
                   ))}
+                  {group.prompts.length > 2 && !expandedPromptGroups[group.title] ? (
+                    <button
+                      className="user-prompt-more"
+                      disabled={isWorkspaceLocked}
+                      onClick={() =>
+                        setExpandedPromptGroups((current) => ({
+                          ...current,
+                          [group.title]: true,
+                        }))
+                      }
+                      type="button"
+                    >
+                      查看更多
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ))}
           </div>
 
-          <div className="user-object-choices">
-            <div className="user-lane-title">整倍体指标怎么选</div>
-            <div className="user-object-choice-list">
+          {workspace.objectChoices ? <div className="user-object-choices">
+            <div className="user-object-choices-head">
+              <div className="user-lane-title">整倍体指标怎么选</div>
               <button
-                className="user-object-choice"
-                disabled={isSubmitting || !sessionReady}
-                onClick={() => void submitPrompt("看一下 PGT-A 的胚胎整倍体率")}
+                className="user-prompt-more"
+                disabled={isWorkspaceLocked}
+                onClick={() => setShowObjectChoices((current) => !current)}
                 type="button"
               >
-                <span className="user-object-choice-kicker">输出胚胎数和比例</span>
-                <strong>胚胎整倍体率</strong>
-                <span>适合判断检测胚胎中未见异常的占比。</span>
-              </button>
-              <button
-                className="user-object-choice"
-                disabled={isSubmitting || !sessionReady}
-                onClick={() => void submitPrompt("看一下 PGT-A 的周期整倍体结局")}
-                type="button"
-              >
-                <span className="user-object-choice-kicker">输出周期结局分布</span>
-                <strong>周期整倍体结局</strong>
-                <span>适合判断每个周期是否有可用整倍体胚胎。</span>
+                {showObjectChoices ? "收起说明" : "查看说明"}
               </button>
             </div>
-          </div>
+            {showObjectChoices ? (
+              <div className="user-object-choice-list">
+                {workspace.objectChoices.map((choice) => (
+                  <button
+                    className="user-object-choice"
+                    disabled={isWorkspaceLocked}
+                    key={choice.prompt}
+                    onClick={() => void submitPrompt(choice.prompt)}
+                    type="button"
+                  >
+                    <span className="user-object-choice-kicker">{choice.kicker}</span>
+                    <strong>{choice.title}</strong>
+                    <span>{choice.description}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div> : null}
         </section>
 
         <aside className="user-capability-panel">
@@ -528,16 +736,20 @@ function UserWorkspace({
             <div className="user-panel-title">当前数据</div>
             <div className="user-scope-list">
               <div>
-                <span>医院</span>
+                <span>权限视角</span>
+                <strong>{accessMode === "all" ? "内部账号" : "本院账号"}</strong>
+              </div>
+              <div>
+                <span>当前范围</span>
                 <strong>{hospitalName}</strong>
               </div>
               <div>
-                <span>数据时间</span>
-                <strong>{snapshotRange}</strong>
+                <span>当前可分析</span>
+                <strong>{productScope}</strong>
               </div>
               <div>
-                <span>当前可分析</span>
-                <strong>PGT-A</strong>
+                <span>数据范围</span>
+                <strong>{snapshotRange}</strong>
               </div>
             </div>
           </div>
@@ -547,7 +759,7 @@ function UserWorkspace({
           <div className="user-panel-section">
             <div className="user-panel-title">能问什么</div>
             <ul className="user-capability-list">
-              {workflowHints[0].items.map((item) => (
+              {workspace.workflowHints[0].items.map((item) => (
                 <li key={item}>{item}</li>
               ))}
             </ul>
@@ -556,7 +768,7 @@ function UserWorkspace({
           <div className="user-panel-section">
             <div className="user-panel-title">可以怎么限定</div>
             <ul className="user-capability-list user-capability-list-soft">
-              {workflowHints[1].items.map((item) => (
+              {workspace.workflowHints[1].items.map((item) => (
                 <li key={item}>{item}</li>
               ))}
             </ul>
@@ -564,13 +776,6 @@ function UserWorkspace({
         </aside>
 
         <section className="user-answer-panel">
-          {turns.length === 0 ? (
-            <div className="user-empty-answer">
-              <div className="user-empty-title">先问一个单指标问题</div>
-              <p>例如送检量、整倍体率、质控情况、结果分布。问题不够明确时，我会给出补参选项。</p>
-            </div>
-          ) : null}
-
           <div className="user-thread">
             {turns.map((turn, index) => (
               <article className={`user-turn user-turn-${turn.role}`} key={`${turn.role}-${index}`}>
@@ -603,7 +808,7 @@ function UserWorkspace({
                 {latestAssistant.response.follow_up_suggestions.map((item) => (
                   <button
                     className="user-followup-chip"
-                    disabled={isSubmitting || !sessionReady}
+                    disabled={isWorkspaceLocked}
                     key={item}
                     onClick={() => void submitPrompt(item)}
                     type="button"
@@ -620,7 +825,7 @@ function UserWorkspace({
               >
                 <input
                   className="user-followup-input"
-                  disabled={!sessionReady}
+                  disabled={isSwitchingProduct || !sessionReady}
                   onChange={(event) => onInputChange(event.target.value)}
                   placeholder="继续输入你的问题"
                   type="text"
@@ -628,7 +833,7 @@ function UserWorkspace({
                 />
                 <button
                   className="user-followup-submit"
-                  disabled={isSubmitting || !sessionReady || !input.trim()}
+                  disabled={isSwitchingProduct || isSubmitting || !sessionReady || !input.trim()}
                   type="submit"
                 >
                   {isSubmitting ? "发送中..." : "发送"}
@@ -651,36 +856,31 @@ function SessionOverviewPanel({ overview }: { overview: NonNullable<SessionRecor
   return (
     <section className="session-overview-panel">
       <div className="session-overview-copy">
-        <div className="session-overview-kicker">Current Snapshot View</div>
-        <h2>会话已连接，先看当前医院的整体盘面</h2>
-        <p>{overview.summary}</p>
+        <div className="session-overview-kicker">数据概览</div>
+        <h2>{overview.hospital_scope_mode === "all" ? "全部医院当前数据概览" : "当前医院数据概览"}</h2>
       </div>
 
       <div className="session-overview-grid">
         <article className="session-overview-stat session-overview-stat-hero">
-          <span className="session-overview-label">当前快照胚胎数</span>
+          <span className="session-overview-label">可分析胚胎</span>
           <strong>{overview.embryo_count.toLocaleString("zh-CN")}</strong>
-          <span className="session-overview-footnote">可直接进入 PGT-A 受控统计分析的胚胎样本</span>
         </article>
 
         <article className="session-overview-stat">
-          <span className="session-overview-label">覆盖周期数</span>
+          <span className="session-overview-label">涉及周期</span>
           <strong>{overview.cycle_count.toLocaleString("zh-CN")}</strong>
-          <span className="session-overview-footnote">按送检单编号去重后的周期规模</span>
         </article>
 
         <article className="session-overview-stat session-overview-stat-soft">
-          <span className="session-overview-label">平均每周期胚胎数</span>
+          <span className="session-overview-label">每周期平均胚胎</span>
           <strong>{avgEmbryosPerCycle}</strong>
-          <span className="session-overview-footnote">帮助客户先建立当前盘面的规模感知</span>
         </article>
 
         <article className="session-overview-stat session-overview-stat-range">
-          <span className="session-overview-label">数据覆盖月份</span>
+          <span className="session-overview-label">当前产品</span>
           <strong>
-            {overview.snapshot_start} <span>至</span> {overview.snapshot_end}
+            {overview.product_scope}
           </strong>
-          <span className="session-overview-footnote">后续追问默认沿用当前医院，再叠加时间和年龄筛选</span>
         </article>
       </div>
     </section>

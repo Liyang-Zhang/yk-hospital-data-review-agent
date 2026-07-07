@@ -1,22 +1,27 @@
 from fastapi import APIRouter
 
 from yk_review_agent.services.pgta_record_source import get_pgta_record_source
+from yk_review_agent.services.pgtsr_record_source import get_pgtsr_record_source
 from yk_review_agent.services.snapshot_service import snapshot_service
 
 router = APIRouter()
 
 
 @router.get("/demo/metadata")
-def demo_metadata() -> dict:
-    dataset = get_pgta_record_source()
-    snapshot = snapshot_service.get_snapshot_metadata()
+def demo_metadata(product_scope: str = "PGT-A", access_mode: str = "all") -> dict:
+    dataset = get_pgtsr_record_source() if product_scope == "PGT-SR" else get_pgta_record_source()
+    snapshot = snapshot_service.get_snapshot_metadata_for_product(product_scope)
     hospitals = dataset.hospitals
+    default_hospital = hospitals[0] if hospitals else None
+    can_access_all_hospitals = access_mode != "single"
+    visible_hospitals = hospitals if can_access_all_hospitals else ([default_hospital] if default_hospital else [])
     return {
         "product_scope": snapshot.product_scope,
         "data_source": snapshot.data_source,
         "snapshot_start": snapshot.snapshot_start,
         "snapshot_end": snapshot.snapshot_end,
         "hospital_count": snapshot.hospital_count,
+        "can_access_all_hospitals": can_access_all_hospitals,
         "capability_overview": {
             "supported_topics": [
                 "送检量与周期规模",
@@ -57,6 +62,6 @@ def demo_metadata() -> dict:
             ],
             "limitations": snapshot.limitations,
         },
-        "default_hospital": hospitals[0] if hospitals else None,
-        "hospitals": hospitals[:20],
+        "default_hospital": default_hospital,
+        "hospitals": visible_hospitals,
     }

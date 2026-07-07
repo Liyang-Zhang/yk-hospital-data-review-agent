@@ -10,6 +10,11 @@ SUPPORTED_METRIC_IDS = {
     "pgta_mosaic_abnormal",
     "pgta_cycle_indicator_overview",
     "pgta_special_cnv_overview",
+    "pgtsr_total_volume",
+    "pgtsr_quality_overview",
+    "pgtsr_result_overview",
+    "pgtsr_cycle_indicator_overview",
+    "pgtsr_next_step_overview",
 }
 
 
@@ -39,13 +44,21 @@ class ParsedIntent(BaseModel):
         default=None,
         description="年龄筛选范围，例如 lt:35、between:35,37、gt:35、gte:41、missing。",
     )
+    age_scope: str | None = Field(
+        default=None,
+        description="年龄筛选对象，可选 patient/spouse。",
+    )
+    sr_clinical_type: str | None = Field(
+        default=None,
+        description="PGT-SR 项目sheet中的临床指征汇总分类。",
+    )
     product_scope: str = Field(
         default="PGT-A",
         description="当前产品范围。第一版只允许 PGT-A。",
     )
     breakdown: str = Field(
         default="overall",
-        description="输出拆分维度，可选 overall/month/quarter/day/age/result/qc。",
+        description="输出拆分维度，可选 overall/month/quarter/day/age/result/qc/sr_clinical_type。",
     )
     focus: str = Field(
         default="summary",

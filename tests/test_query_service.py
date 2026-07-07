@@ -211,3 +211,45 @@ def test_age_range_filter_is_applied_to_euploid_metric() -> None:
         },
     )
     assert result["evidence"]["status"] == "ready"
+
+
+def test_pgtsr_volume_returns_expected_shape() -> None:
+    result = query_service.run(
+        "pgtsr_total_volume",
+        {**BASE_FILTERS, "time_range": "当前快照全部时间", "breakdown": "month", "focus": "trend"},
+    )
+
+    assert result["table"]["title"].startswith("按月份统计的 PGT-SR")
+    assert result["table"]["rows"]
+
+
+def test_pgtsr_next_step_overview_returns_expected_columns() -> None:
+    result = query_service.run(
+        "pgtsr_next_step_overview",
+        {**BASE_FILTERS, "time_range": "2025年", "breakdown": "overall", "focus": "summary"},
+    )
+
+    assert result["table"]["columns"] == [
+        "时间",
+        "检测周期数",
+        "否",
+        "是（评估后符合非遗传型构建）",
+        "是（评估后符合遗传型构建）",
+        "/",
+    ]
+
+
+def test_pgtsr_cycle_indicator_supports_sr_clinical_type_breakdown() -> None:
+    result = query_service.run(
+        "pgtsr_cycle_indicator_overview",
+        {
+            **BASE_FILTERS,
+            "time_range": "2025年",
+            "breakdown": "sr_clinical_type",
+            "focus": "distribution",
+        },
+    )
+
+    assert result["metric_id"] == "pgtsr_cycle_indicator_overview"
+    assert result["table"]["columns"][0] == "临床指征"
+    assert result["table"]["rows"]

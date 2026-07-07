@@ -79,6 +79,33 @@ class BusinessRequestService:
         registry = get_snapshot_registry()
         profile = registry.get_profile(product)
 
+        if product == "PGT-SR":
+            supported_now = {
+                "cycle_count",
+                "embryo_count",
+                "na_rate",
+                "abnormal_rate",
+                "mosaic_only_rate",
+            }
+            if metric.code in supported_now:
+                return MetricCapability(
+                    code=metric.code,
+                    label=metric.label,
+                    status="supported",
+                    reason="当前 PGT-SR 第一阶段已接入基础规模、结果分布和质控相关执行能力。",
+                )
+            unsupported_reasons = {
+                "amplification_success_rate": "当前 PGT-SR 第一阶段未对扩增成功率建立正式业务口径。",
+                "euploid_rate": "当前 PGT-SR 第一阶段优先提供周期结局类指标，不直接承诺 PGT-A 风格胚胎整倍体率。",
+                "incidental_rate": "当前 PGT-SR 第一阶段未对意外发现类指标建立正式执行能力。",
+            }
+            return MetricCapability(
+                code=metric.code,
+                label=metric.label,
+                status="unsupported",
+                reason=unsupported_reasons.get(metric.code, "当前 PGT-SR 第一阶段未对该指标建立稳定执行能力。"),
+            )
+
         if product != "PGT-A":
             return MetricCapability(
                 code=metric.code,

@@ -15,6 +15,7 @@ from yk_review_agent.services.metric_catalog import (
     get_metric,
 )
 from yk_review_agent.services.pgta_record_source import get_pgta_record_source
+from yk_review_agent.services.pgtsr_record_source import get_pgtsr_record_source
 
 AMBIGUOUS_EUPLOID_OBJECT_TERMS = (
     "无整倍体率",
@@ -30,17 +31,28 @@ class AnswerabilityPolicy:
         parsed: ParsedIntent,
         hospital_id: str,
         hospital_name: str | None,
+        hospital_scope_mode: str = "single",
         accessible_hospital_ids: list[str] | None = None,
         can_access_all_hospitals: bool = False,
     ) -> AnalysisPlan:
-        target_hospital_id = parsed.requested_hospital_id or hospital_id
+        target_hospital_id = parsed.requested_hospital_id or (hospital_id if hospital_scope_mode == "single" else None)
+        product_scope = parsed.product_scope or "PGT-A"
         filters = {
             "time_range": parsed.time_range,
-            "hospital_id": target_hospital_id,
-            "hospital_name": target_hospital_id,
+            "hospital_scope_mode": hospital_scope_mode,
+            **({"hospital_id": target_hospital_id, "hospital_name": target_hospital_id} if target_hospital_id else {}),
             "breakdown": parsed.breakdown,
             "focus": parsed.focus,
-            **({"age_range": parsed.age_range} if parsed.age_range else {}),
+            **(
+                {"patient_age_range": parsed.age_range}
+                if parsed.age_range and parsed.age_scope == "patient"
+                else {"spouse_age_range": parsed.age_range}
+                if parsed.age_range and parsed.age_scope == "spouse"
+                else {"age_range": parsed.age_range}
+                if parsed.age_range
+                else {}
+            ),
+            **({"sr_clinical_type": parsed.sr_clinical_type} if parsed.sr_clinical_type else {}),
         }
         time_grain = self._infer_time_grain(parsed.time_range, parsed.breakdown)
         resolution = function_resolver.resolve(message=parsed.normalized_message or message, parsed=parsed)
@@ -50,15 +62,28 @@ class AnswerabilityPolicy:
             time_grain=time_grain,
             host_hospital_id=hospital_id,
             host_hospital_name=hospital_name or hospital_id,
+            hospital_scope_mode=hospital_scope_mode,
             accessible_hospital_ids=accessible_hospital_ids,
             can_access_all_hospitals=can_access_all_hospitals,
         ):
             return hospital_access_plan
 
+        if hospital_scope_mode == "all" and not can_access_all_hospitals:
+            return AnalysisPlan(
+                product_scope=product_scope,
+                breakdown=parsed.breakdown,
+                time_grain=time_grain,
+                filters=filters,
+                answer_mode="refuse",
+                rationale="当前账号不具备全部医院的数据权限，不能切换到全部医院模式。",
+                suggestions=REFUSE_SUGGESTIONS,
+                normalized_message=parsed.normalized_message,
+            )
+
         if parsed.follow_up_resolution.mode == "none" and not self._is_domain_relevant(message):
             if "分析" in message:
                 return AnalysisPlan(
-                    product_scope="PGT-A",
+                    product_scope=product_scope,
                     breakdown=parsed.breakdown,
                     time_grain=time_grain,
                     filters=filters,
@@ -70,10 +95,10 @@ class AnswerabilityPolicy:
                     normalized_message=parsed.normalized_message,
                 )
             rationale = (
-                "当前助手只回答医院 PGT-A 数据回顾相关问题，暂不支持天气、闲聊或通用知识问答。"
+                "当前助手只回答医院 PGT 数据回顾相关问题，暂不支持天气、闲聊或通用知识问答。"
             )
             return AnalysisPlan(
-                product_scope="PGT-A",
+                product_scope=parsed.product_scope or "PGT-A",
                 breakdown=parsed.breakdown,
                 time_grain=time_grain,
                 filters=filters,
@@ -106,21 +131,21 @@ class AnswerabilityPolicy:
                 time_grain=time_grain,
             )
 
-        if parsed.product_scope not in {"PGT-A", ""}:
+        if parsed.product_scope not in {"PGT-A", "PGT-SR", ""}:
             return AnalysisPlan(
                 product_scope=parsed.product_scope,
                 breakdown=parsed.breakdown,
                 time_grain=time_grain,
                 filters=filters,
                 answer_mode="refuse",
-                rationale="当前快照模式已接入多产品文件，但真实执行主链路仍只支持 PGT-A，暂不支持 PGT-SR、PGT-M、PGT-AH 或全产品汇总执行。",
+                rationale="当前快照模式已接入多产品文件，但真实执行主链路当前只支持 PGT-A 与 PGT-SR 第一阶段统计，不支持 PGT-M、PGT-AH 或全产品汇总执行。",
                 suggestions=REFUSE_SUGGESTIONS,
                 normalized_message=parsed.normalized_message,
             )
 
-        if unsupported_topic_reason := self._unsupported_topic_reason(message):
+        if unsupported_topic_reason := self._unsupported_topic_reason(message, product_scope):
             return AnalysisPlan(
-                product_scope="PGT-A",
+                product_scope=product_scope,
                 breakdown=parsed.breakdown,
                 time_grain=time_grain,
                 filters=filters,
@@ -132,7 +157,7 @@ class AnswerabilityPolicy:
 
         if conflict_reason := self._detect_conflict(message):
             return AnalysisPlan(
-                product_scope="PGT-A",
+                product_scope=product_scope,
                 breakdown=parsed.breakdown,
                 time_grain=time_grain,
                 filters=filters,
@@ -155,7 +180,7 @@ class AnswerabilityPolicy:
 
         if len(set(candidate_ids)) > 1:
             return AnalysisPlan(
-                product_scope="PGT-A",
+                product_scope=product_scope,
                 breakdown=parsed.breakdown,
                 time_grain=time_grain,
                 filters=filters,
@@ -178,7 +203,7 @@ class AnswerabilityPolicy:
                 clarification_question = "请补充你想延续的时间范围，例如 2025年7月、2025年Q3 或 2025年7月到10月。"
                 rationale = "当前追问没有可安全继承的时间范围，需要先补充时间。"
             return AnalysisPlan(
-                product_scope="PGT-A",
+                product_scope=product_scope,
                 breakdown=parsed.breakdown,
                 time_grain=time_grain,
                 filters=filters,
@@ -194,7 +219,7 @@ class AnswerabilityPolicy:
         metric = get_metric(metric_id)
         if metric is None:
             return AnalysisPlan(
-                product_scope="PGT-A",
+                product_scope=product_scope,
                 breakdown=parsed.breakdown,
                 time_grain=time_grain,
                 filters=filters,
@@ -205,9 +230,9 @@ class AnswerabilityPolicy:
                 normalized_message=parsed.normalized_message,
             )
 
-        if "PGT-A" not in metric.supported_products:
+        if product_scope not in metric.supported_products:
             return AnalysisPlan(
-                product_scope="PGT-A",
+                product_scope=product_scope,
                 breakdown=parsed.breakdown,
                 time_grain=time_grain,
                 filters=filters,
@@ -219,9 +244,9 @@ class AnswerabilityPolicy:
             )
 
         for filter_name in filters:
-            if filter_name not in metric.supported_filters and filter_name not in {"breakdown", "focus"}:
+            if filter_name not in metric.supported_filters and filter_name not in {"breakdown", "focus", "hospital_scope_mode"}:
                 return AnalysisPlan(
-                    product_scope="PGT-A",
+                    product_scope=product_scope,
                     breakdown=parsed.breakdown,
                     time_grain=time_grain,
                     filters=filters,
@@ -234,7 +259,7 @@ class AnswerabilityPolicy:
 
         if parsed.breakdown not in metric.supported_breakdowns:
             return AnalysisPlan(
-                product_scope="PGT-A",
+                product_scope=product_scope,
                 breakdown=parsed.breakdown,
                 time_grain=time_grain,
                 filters=filters,
@@ -247,7 +272,7 @@ class AnswerabilityPolicy:
 
         if time_grain not in metric.supported_time_grains:
             return AnalysisPlan(
-                product_scope="PGT-A",
+                product_scope=product_scope,
                 breakdown=parsed.breakdown,
                 time_grain=time_grain,
                 filters=filters,
@@ -258,9 +283,9 @@ class AnswerabilityPolicy:
                 normalized_message=parsed.normalized_message,
             )
 
-        if not set(metric.data_requirements).issubset(active_data_capabilities("PGT-A")):
+        if not set(metric.data_requirements).issubset(active_data_capabilities(product_scope)):
             return AnalysisPlan(
-                product_scope="PGT-A",
+                product_scope=product_scope,
                 breakdown=parsed.breakdown,
                 time_grain=time_grain,
                 filters=filters,
@@ -273,7 +298,7 @@ class AnswerabilityPolicy:
 
         if metric.unsupported_combinations and parsed.breakdown in metric.unsupported_combinations:
             return AnalysisPlan(
-                product_scope="PGT-A",
+                product_scope=product_scope,
                 breakdown=parsed.breakdown,
                 time_grain=time_grain,
                 filters=filters,
@@ -285,7 +310,7 @@ class AnswerabilityPolicy:
             )
 
         return AnalysisPlan(
-            product_scope="PGT-A",
+            product_scope=product_scope,
             metric_family=metric.metric_id,
             breakdown=parsed.breakdown,
             time_grain=time_grain,
@@ -367,9 +392,11 @@ class AnswerabilityPolicy:
             return True
         return False
 
-    def _unsupported_topic_reason(self, message: str) -> str | None:
-        if "临床指征" in message or "流产" in message or "种植失败" in message:
+    def _unsupported_topic_reason(self, message: str, product_scope: str) -> str | None:
+        if ("临床指征" in message and product_scope != "PGT-SR") or "流产" in message or "种植失败" in message:
             return "当前第一版暂不支持临床指征相关统计，因为这些字段口径还未完全确认。"
+        if product_scope == "PGT-SR" and any(term in message for term in ("MaReCs", "marecs", "第二阶段", "二阶段")):
+            return "当前第一阶段暂不支持 PGT-SR MaReCs 第二阶段相关统计。"
         return None
 
     def _clarify_ambiguous_euploid_object(
@@ -402,7 +429,7 @@ class AnswerabilityPolicy:
             return None
 
         return AnalysisPlan(
-            product_scope="PGT-A",
+            product_scope=parsed.product_scope or "PGT-A",
             breakdown=parsed.breakdown,
             time_grain=time_grain,
             filters=filters,
@@ -433,6 +460,8 @@ class AnswerabilityPolicy:
     def _infer_time_grain(self, time_range: str, breakdown: str) -> str:
         if breakdown == "age":
             return "overall"
+        if breakdown == "sr_clinical_type":
+            return "overall"
         if re.search(r"(20\d{2}年)?([1-9]|1[0-2])月([1-9]|[12]\d|3[01])[日号]", time_range) or re.search(
             r"(20\d{2})[-/](0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])",
             time_range,
@@ -453,6 +482,7 @@ class AnswerabilityPolicy:
             "age": "按年龄",
             "result": "结果结构",
             "qc": "质控",
+            "sr_clinical_type": "临床指征",
         }
         return mapping.get(breakdown, breakdown)
 
@@ -471,6 +501,9 @@ class AnswerabilityPolicy:
             "hospital_name": "医院",
             "time_range": "时间范围",
             "age_range": "年龄范围",
+            "patient_age_range": "受检人年龄范围",
+            "spouse_age_range": "配偶年龄范围",
+            "sr_clinical_type": "临床指征",
         }
         return mapping.get(filter_name, filter_name)
 
@@ -486,6 +519,21 @@ class AnswerabilityPolicy:
                 "补充 PGT-A 的特殊 CNV 提示情况",
                 "再看一下 PGT-A 的质控情况",
             ],
+            "pgtsr_total_volume": [
+                "看一下 PGT-SR 质控情况",
+                "看一下 PGT-SR 结果分布",
+                "看一下 PGT-SR 是否进入下一步易位筛查",
+            ],
+            "pgtsr_result_overview": [
+                "看一下 PGT-SR 周期结局",
+                "看一下 PGT-SR 是否进入下一步易位筛查",
+                "按临床指征看一下 PGT-SR 周期结局",
+            ],
+            "pgtsr_cycle_indicator_overview": [
+                "按临床指征看一下 PGT-SR 周期结局",
+                "看一下 PGT-SR 是否进入下一步易位筛查",
+                "看一下 PGT-SR 结果分布",
+            ],
         }
         return mapping.get(metric_id, CLARIFY_PROMPTS)
 
@@ -497,6 +545,7 @@ class AnswerabilityPolicy:
         time_grain: str,
         host_hospital_id: str,
         host_hospital_name: str,
+        hospital_scope_mode: str,
         accessible_hospital_ids: list[str] | None,
         can_access_all_hospitals: bool,
     ) -> AnalysisPlan | None:
@@ -504,10 +553,13 @@ class AnswerabilityPolicy:
         if not requested_hospital_id:
             return None
 
-        known_hospitals = {item["hospital_id"] for item in get_pgta_record_source().hospitals}
+        if parsed.product_scope == "PGT-SR":
+            known_hospitals = {item["hospital_id"] for item in get_pgtsr_record_source().hospitals}
+        else:
+            known_hospitals = {item["hospital_id"] for item in get_pgta_record_source().hospitals}
         if requested_hospital_id not in known_hospitals:
             return AnalysisPlan(
-                product_scope="PGT-A",
+                product_scope=parsed.product_scope or "PGT-A",
                 breakdown=parsed.breakdown,
                 time_grain=time_grain,
                 filters=filters,
@@ -520,12 +572,12 @@ class AnswerabilityPolicy:
         if requested_hospital_id == host_hospital_id or can_access_all_hospitals:
             return None
 
-        allowed_hospitals = set(accessible_hospital_ids or [host_hospital_id])
+        allowed_hospitals = set(accessible_hospital_ids or ([] if hospital_scope_mode == "all" else [host_hospital_id]))
         if requested_hospital_id in allowed_hospitals:
             return None
 
         return AnalysisPlan(
-            product_scope="PGT-A",
+            product_scope=parsed.product_scope or "PGT-A",
             breakdown=parsed.breakdown,
             time_grain=time_grain,
             filters=filters,
