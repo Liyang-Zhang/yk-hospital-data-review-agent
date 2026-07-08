@@ -78,6 +78,34 @@ class FunctionResolver:
                 score += 5
             return score
 
+        if metric.metric_id == "pgtsr_euploid_rate":
+            if self._contains_any(message, ("周期无整倍体", "周期整倍体率", "周期整倍体结局", "周期结局")):
+                return 0
+            score += self._term_score(message, metric.hard_terms, hard=True)
+            score += self._term_score(message, metric.soft_terms, hard=False)
+            if parsed.breakdown == "age" and score > 0:
+                score += 5
+            if parsed.breakdown == "sr_clinical_type" and score > 0:
+                score += 5
+            if self._contains_any(
+                message,
+                (
+                    "胚胎整倍体率",
+                    "胚胎整倍体情况",
+                    "整倍体胚胎比例",
+                    "整倍体胚胎占比",
+                    "整倍体情况",
+                    "每个胚胎",
+                    "每枚胚胎",
+                    "胚胎层面",
+                    "从胚胎角度",
+                    "按胚胎看",
+                    "需要多少胚胎",
+                ),
+            ) and score > 0:
+                score += 8
+            return score
+
         score += self._term_score(message, metric.hard_terms, hard=True)
         score += self._term_score(message, metric.soft_terms, hard=False)
         return score
@@ -212,6 +240,27 @@ class FunctionResolver:
                 if metric_id not in {"pgta_euploid_rate", "pgt_total_volume"}
             ]
         if "pgtsr_cycle_indicator_overview" in candidate_metric_ids:
+            if "pgtsr_euploid_rate" in candidate_metric_ids and self._contains_any(
+                message,
+                (
+                    "胚胎整倍体率",
+                    "胚胎整倍体情况",
+                    "整倍体胚胎比例",
+                    "整倍体胚胎占比",
+                    "整倍体情况",
+                    "每个胚胎",
+                    "胚胎层面",
+                    "从胚胎角度",
+                    "按胚胎看",
+                    "每枚胚胎",
+                    "需要多少胚胎",
+                ),
+            ):
+                return [
+                    metric_id
+                    for metric_id in candidate_metric_ids
+                    if metric_id == "pgtsr_euploid_rate"
+                ]
             if "pgtsr_total_volume" in candidate_metric_ids and self._contains_any(
                 message,
                 (
@@ -235,10 +284,8 @@ class FunctionResolver:
                     "整体结局",
                     "周期结局",
                     "周期整倍体",
-                    "按临床指征",
-                    "罗氏易位",
-                    "平衡易位",
-                    "倒位",
+                    "有整倍体胚胎的周期",
+                    "无整倍体周期",
                 ),
             ):
                 return [
@@ -250,6 +297,35 @@ class FunctionResolver:
                 metric_id
                 for metric_id in candidate_metric_ids
                 if metric_id not in {"pgtsr_total_volume", "pgtsr_result_overview"}
+            ]
+        if "pgtsr_euploid_rate" in candidate_metric_ids and "pgtsr_result_overview" in candidate_metric_ids:
+            if self._contains_any(
+                message,
+                (
+                    "整倍体率",
+                    "euploid",
+                    "胚胎整倍体率",
+                    "胚胎整倍体情况",
+                    "整倍体胚胎比例",
+                    "整倍体胚胎占比",
+                    "整倍体情况",
+                    "按年龄分层",
+                    "女方年龄",
+                    "男方年龄",
+                    "胚胎层面",
+                    "需要多少胚胎",
+                ),
+            ):
+                return [
+                    metric_id
+                    for metric_id in candidate_metric_ids
+                    if metric_id == "pgtsr_euploid_rate"
+                ]
+        if "pgtsr_euploid_rate" in candidate_metric_ids and "pgtsr_total_volume" in candidate_metric_ids:
+            return [
+                metric_id
+                for metric_id in candidate_metric_ids
+                if metric_id != "pgtsr_total_volume"
             ]
         if {
             "pgta_special_cnv_overview",

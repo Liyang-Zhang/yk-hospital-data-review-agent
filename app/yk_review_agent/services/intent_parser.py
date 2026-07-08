@@ -22,6 +22,7 @@ SUPPORTED_METRICS_TEXT = """
 - pgta_mosaic_abnormal: 嵌合、异常结构、异常率、异倍体率、意外发现率
 - pgta_cycle_indicator_overview: 周期无整倍体率、周期整倍体率、仅1个整倍体、>=2个整倍体
 - pgta_special_cnv_overview: 1Mb~4Mb、4Mb~10Mb、>=10Mb 特殊 CNV 提示、拟常染色体区域异常
+- pgtsr_euploid_rate: PGT-SR 整倍体率、按月/季度/日期看整倍体率、按年龄分层看整倍体率
 - pgtsr_total_volume: PGT-SR 送检量、周期数、胚胎数、平均每周期胚胎数
 - pgtsr_quality_overview: PGT-SR 质控情况、检测成功率、PASS/INFO/FAIL、NA
 - pgtsr_result_overview: PGT-SR 结果分布、异常、嵌合异常
@@ -168,6 +169,7 @@ class IntentParserService:
             age_range=parsed.age_range,
             age_scope=parsed.age_scope,
             sr_clinical_type=parsed.sr_clinical_type,
+            sr_clinical_types=parsed.sr_clinical_types,
             has_explicit_age_range=parsed.has_explicit_age_range,
             has_explicit_hospital_scope=parsed.has_explicit_hospital_scope,
             requested_hospital_id=parsed.requested_hospital_id,
@@ -188,7 +190,14 @@ class IntentParserService:
                     if parsed.age_range
                     else {}
                 ),
-                **({"sr_clinical_type": parsed.sr_clinical_type} if parsed.sr_clinical_type else {}),
+                **(
+                    {"sr_clinical_type": parsed.sr_clinical_type}
+                    if parsed.sr_clinical_type
+                    else {"sr_clinical_types": "|".join(parsed.sr_clinical_types)}
+                    if parsed.sr_clinical_types
+                    else {}
+                ),
+                **({"age_scope": parsed.age_scope} if parsed.age_scope else {}),
             },
             unsupported_reason=parsed.unsupported_reason,
         )
@@ -222,6 +231,7 @@ class IntentParserService:
             age_range=age_range,
             age_scope=age_scope,
             sr_clinical_type=sr_clinical_type,
+            sr_clinical_types=self._extract_sr_clinical_types(message),
             has_explicit_age_range=age_range is not None,
             has_explicit_hospital_scope=requested_hospital_id is not None,
             requested_hospital_id=requested_hospital_id,
@@ -290,9 +300,21 @@ class IntentParserService:
         return None
 
     def _infer_breakdown(self, message: str, age_range: str | None, sr_clinical_type: str | None) -> str:
-        if any(keyword in message.lower() for keyword in ("按临床指征", "不同sr患者", "不同患者")):
-            return "sr_clinical_type"
-        if sum(1 for term in ("罗氏易位", "平衡易位", "倒位", "微缺微重", "正常/嵌合/多态", "两种适应症", "插入") if term in message) >= 2:
+        normalized_message = message.replace(" ", "")
+        if any(
+            keyword in normalized_message.lower()
+            for keyword in (
+                "按临床指征",
+                "不同临床指征",
+                "临床指征分层",
+                "按适应症",
+                "不同适应症",
+                "适应症分层",
+                "按临床类型",
+                "不同sr患者",
+                "不同患者",
+            )
+        ):
             return "sr_clinical_type"
         if sr_clinical_type and any(keyword in message for keyword in ("罗氏易位", "平衡易位", "倒位")):
             return "sr_clinical_type"
@@ -373,13 +395,19 @@ class IntentParserService:
         return None
 
     def _extract_age_scope(self, message: str) -> str | None:
-        if any(term in message for term in ("配偶年龄", "男方年龄", "女方配偶年龄")):
+        if any(term in message for term in ("配偶年龄", "男方年龄", "男性年龄", "丈夫年龄", "女方配偶年龄")):
             return "spouse"
-        if any(term in message for term in ("受检人年龄", "患者年龄", "女方年龄")):
+        if any(term in message for term in ("受检人年龄", "患者年龄", "女方年龄", "女性年龄", "妻子年龄")):
             return "patient"
         return None
 
     def _extract_sr_clinical_type(self, message: str) -> str | None:
+        matched = self._extract_sr_clinical_types(message)
+        if len(matched) == 1:
+            return matched[0]
+        return None
+
+    def _extract_sr_clinical_types(self, message: str) -> list[str]:
         candidates = (
             "平衡易位",
             "罗氏易位",
@@ -389,10 +417,7 @@ class IntentParserService:
             "两种适应症",
             "插入",
         )
-        matched = [candidate for candidate in candidates if candidate in message]
-        if len(matched) == 1:
-            return matched[0]
-        return None
+        return [candidate for candidate in candidates if candidate in message]
 
     def _topic_for(self, metric_id: str, breakdown: str, focus: str) -> str:
         mapping = {
@@ -402,6 +427,7 @@ class IntentParserService:
             "pgta_mosaic_abnormal": "PGT-A 嵌合与异常结构",
             "pgta_cycle_indicator_overview": "PGT-A 周期结局总览",
             "pgta_special_cnv_overview": "PGT-A 特殊 CNV 提示总览",
+            "pgtsr_euploid_rate": "PGT-SR 整倍体率",
             "pgtsr_total_volume": "PGT-SR 送检量",
             "pgtsr_quality_overview": "PGT-SR 检测与质控总览",
             "pgtsr_result_overview": "PGT-SR 结果分布",
@@ -413,7 +439,7 @@ class IntentParserService:
         if breakdown == "sr_clinical_type":
             return "PGT-SR 临床指征分组分析"
         if breakdown == "age":
-            return "PGT-A 年龄分层分析"
+            return "年龄分层分析"
         if breakdown == "qc":
             return "PGT-A 质控分析"
         if breakdown == "result":

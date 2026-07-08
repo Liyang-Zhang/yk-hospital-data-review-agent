@@ -334,6 +334,12 @@ class ConversationAgent:
                 "看一下 PGT-A 的特殊 CNV 提示情况",
                 "再看一下 PGT-A 的质控情况",
             ]
+        if metric_id == "pgtsr_euploid_rate":
+            return [
+                "按临床指征统计下 PGT-SR 胚胎整倍体率",
+                "按临床指征看一下 PGT-SR 周期整倍体率情况",
+                "PGT-SR 中罗氏易位患者的胚胎整倍体率情况",
+            ]
         if metric_id == "pgtsr_total_volume":
             return [
                 "看一下 PGT-SR 质控情况",
@@ -342,9 +348,9 @@ class ConversationAgent:
             ]
         if metric_id == "pgtsr_cycle_indicator_overview":
             return [
-                "按临床指征看一下 PGT-SR 周期结局",
-                "看一下 PGT-SR 是否进入下一步易位筛查",
-                "看一下 PGT-SR 结果分布",
+                "按临床指征统计下 PGT-SR 胚胎整倍体率",
+                "PGT-SR 中罗氏易位患者的胚胎整倍体率情况",
+                "罗氏易位、平衡易位、倒位等不同 SR 患者的胚胎整倍体率",
             ]
         return [
             "看一下当前快照下的 PGT-A 送检量",

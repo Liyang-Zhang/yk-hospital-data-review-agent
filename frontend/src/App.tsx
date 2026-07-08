@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, type CSSProperties, useEffect, useRef, useState } from "react";
 
 import { ClarifyCard } from "./components/ClarifyCard";
 import { ResultCards } from "./components/ResultCards";
@@ -23,18 +23,30 @@ type ViewMode = "user" | "debug";
 type ProductScope = "PGT-A" | "PGT-SR";
 type HospitalScopeMode = "single" | "all";
 
+const PRODUCT_OPTIONS: ProductScope[] = ["PGT-A", "PGT-SR"];
+
 const PRODUCT_WORKSPACES: Record<
   ProductScope,
   {
+    accent: string;
+    businessTags: string[];
+    icon: string;
     promptGroups: Array<{ title: string; description: string; prompts: string[] }>;
     workflowHints: Array<{ title: string; items: string[] }>;
     title: string;
+    portalTitle: string;
+    portalSubtitle: string;
     placeholder: string;
     objectChoices?: Array<{ kicker: string; title: string; description: string; prompt: string }>;
   }
 > = {
   "PGT-A": {
+    accent: "#27614f",
+    businessTags: ["胚胎结果", "年龄分层", "周期结局"],
+    icon: "A",
     title: "PGT-A 数据回顾",
+    portalTitle: "PGT-A 回顾分析",
+    portalSubtitle: "查看送检量、整倍体率、质控和周期结局",
     placeholder: "直接输入你想回顾的问题，例如：2025 年 PGT-A 的整倍体率怎么样？",
     promptGroups: [
       {
@@ -64,27 +76,32 @@ const PRODUCT_WORKSPACES: Record<
     ],
   },
   "PGT-SR": {
+    accent: "#8a4f24",
+    businessTags: ["临床指征", "易位相关", "周期结局"],
+    icon: "SR",
     title: "PGT-SR 数据回顾",
-    placeholder: "直接输入你想回顾的问题，例如：看一下 PGT-SR 是否进入下一步易位筛查？",
+    portalTitle: "PGT-SR 回顾分析",
+    portalSubtitle: "按临床指征查看胚胎整倍体率和周期结局",
+    placeholder: "直接输入你想回顾的问题，例如：按临床指征统计下 PGT-SR 胚胎整倍体率",
     promptGroups: [
       {
-        title: "看规模和趋势",
-        description: "适合先看医院当前 PGT-SR 盘面",
-        prompts: ["看一下当前快照下的 PGT-SR 送检量", "按季度看一下 2025 年 PGT-SR 送检趋势", "看一下 2025 年 7 月到 10 月 PGT-SR 送检量"],
+        title: "按临床指征看",
+        description: "适合比较不同 SR 临床类型的胚胎和周期结局",
+        prompts: ["按临床指征统计下 PGT-SR 胚胎整倍体率", "按临床指征看一下 PGT-SR 周期整倍体率情况", "按临床指征看一下 PGT-SR 周期结局"],
       },
       {
-        title: "看结果和质量",
-        description: "适合查看结果结构和检测质控",
-        prompts: ["看一下 PGT-SR 质控情况", "看一下 PGT-SR 结果分布", "按配偶年龄看一下 PGT-SR 结果分布"],
+        title: "看具体 SR 类型",
+        description: "适合查看罗氏易位、平衡易位、倒位等人群",
+        prompts: ["PGT-SR 中罗氏易位患者的胚胎整倍体率情况", "罗氏易位、平衡易位患者的胚胎整倍体率", "按女性年龄分层统计胚胎整倍体率"],
       },
       {
-        title: "看周期和临床类型",
-        description: "适合查看不同 SR 临床类型的周期结局",
-        prompts: ["看一下 PGT-SR 是否进入下一步易位筛查", "按临床指征看一下 PGT-SR 周期结局", "罗氏易位、平衡易位、倒位等不同 SR 患者的周期整倍体率"],
+        title: "看基础盘面",
+        description: "适合查看规模、质控和结果结构",
+        prompts: ["看一下 PGT-SR 送检量", "看一下 PGT-SR 结果分布", "看一下 PGT-SR 质控情况"],
       },
     ],
     workflowHints: [
-      { title: "可回答的问题", items: ["送检量", "质控", "结果分布", "周期结局", "下一步易位筛查", "按临床指征比较周期结局"] },
+      { title: "可回答的问题", items: ["送检量", "胚胎整倍体率", "结果分布", "周期结局", "下一步易位筛查", "按临床指征比较胚胎整倍体率或周期结局"] },
       { title: "可以使用的条件", items: ["医院", "时间范围", "受检人年龄", "配偶年龄", "临床指征"] },
       { title: "当前不支持", items: ["MaReCs 第二阶段", "核型精细解释", "全产品汇总", "复杂多指标联合执行"] },
     ],
@@ -93,12 +110,11 @@ const PRODUCT_WORKSPACES: Record<
 
 export function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("user");
-  const [selectedProduct, setSelectedProduct] = useState<ProductScope>("PGT-A");
+  const [selectedProduct, setSelectedProduct] = useState<ProductScope | null>(null);
   const [accessMode, setAccessMode] = useState<DemoAccessMode>("all");
   const [hospitalScopeMode, setHospitalScopeMode] = useState<HospitalScopeMode>("single");
   const [selectedHospitalId, setSelectedHospitalId] = useState<string>("");
   const [isSwitchingProduct, setIsSwitchingProduct] = useState(false);
-  const currentWorkspace = PRODUCT_WORKSPACES[selectedProduct];
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [metadata, setMetadata] = useState<DemoMetadata | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -109,7 +125,6 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-    setIsSwitchingProduct(true);
     setTurns([]);
     setInput("");
     setSession(null);
@@ -117,6 +132,13 @@ export function App() {
     setError(null);
     setSelectedHospitalId("");
     setHospitalScopeMode("single");
+    if (!selectedProduct) {
+      setIsSwitchingProduct(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setIsSwitchingProduct(true);
     fetchDemoMetadata(selectedProduct, accessMode)
       .then((meta) => {
         if (cancelled) return;
@@ -129,6 +151,7 @@ export function App() {
       .catch(() => {
         if (!cancelled) {
           setError("无法创建会话，请检查后端服务是否已启动。");
+          setIsSwitchingProduct(false);
         }
       })
     return () => {
@@ -138,7 +161,7 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-    if (!metadata || !selectedHospitalId) {
+    if (!selectedProduct || !metadata || !selectedHospitalId) {
       return () => {
         cancelled = true;
       };
@@ -230,6 +253,8 @@ export function App() {
     await submitPrompt(input.trim());
   }
 
+  const currentWorkspace = selectedProduct ? PRODUCT_WORKSPACES[selectedProduct] : null;
+
   if (viewMode === "user") {
     return (
       <UserWorkspace
@@ -237,6 +262,7 @@ export function App() {
         input={input}
         isSubmitting={isSubmitting}
         metadata={metadata}
+        onEnterProduct={setSelectedProduct}
         onInputChange={setInput}
         hospitalScopeMode={hospitalScopeMode}
         isSwitchingProduct={isSwitchingProduct}
@@ -348,7 +374,7 @@ export function App() {
             先明确主指标，再补时间或年龄条件，系统会更稳定地进入受控统计分析。
           </div>
           <div className="workflow-grid">
-            {currentWorkspace.workflowHints.map((group) => (
+            {(currentWorkspace?.workflowHints ?? []).map((group) => (
               <div className="workflow-block" key={group.title}>
                 <div className="workflow-block-title">{group.title}</div>
                 <div className="workflow-tag-list">
@@ -365,7 +391,12 @@ export function App() {
 
         <section className="sidebar-panel">
           <div className="panel-title">推荐问法</div>
-          {currentWorkspace.promptGroups.map((group) => (
+          {!currentWorkspace ? (
+            <div className="workflow-copy">
+              先返回产品门户选择 PGT-A 或 PGT-SR，研发调试页才会加载对应的问法引导和会话上下文。
+            </div>
+          ) : null}
+          {(currentWorkspace?.promptGroups ?? []).map((group) => (
             <div className="prompt-group" key={group.title}>
               <div className="prompt-group-title">{group.title}</div>
               <div className="prompt-list">
@@ -409,7 +440,7 @@ export function App() {
                 <div className="empty-state">
                     <div className="empty-title">从一个业务问题开始</div>
                     <p className="empty-copy">
-                      当前快照模式已接入 PGT-A、PGT-AH、PGT-SR、PGT-M 业务文件，当前可直接联调 {selectedProduct} 的一阶段受控统计能力。
+                      当前快照模式已接入 PGT-A、PGT-AH、PGT-SR、PGT-M 业务文件；请选择产品后再进入对应的一阶段受控统计工作台。
                     </p>
                   {metadata ? (
                     <div className="empty-guidance">
@@ -480,7 +511,7 @@ export function App() {
                   id="message"
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
-                  placeholder="例如：2025 年 PGT-A 的整倍体率是多少？"
+                  placeholder={currentWorkspace?.placeholder ?? "请先返回产品门户选择产品，再进入研发调试提问。"}
                   rows={3}
                 />
                 <div className="composer-footer">
@@ -507,14 +538,15 @@ type WorkspaceProps = {
   hospitalScopeMode: HospitalScopeMode;
   isSwitchingProduct: boolean;
   metadata: DemoMetadata | null;
+  onEnterProduct: (product: ProductScope) => void;
   onAccessModeChange: (mode: DemoAccessMode) => void;
   onHospitalChange: (hospitalId: string) => void;
   onHospitalScopeModeChange: (mode: HospitalScopeMode) => void;
   onInputChange: (value: string) => void;
   onModeChange: (mode: ViewMode) => void;
-  onProductChange: (product: ProductScope) => void;
+  onProductChange: (product: ProductScope | null) => void;
   onSubmit: (event: FormEvent) => Promise<void>;
-  productScope: ProductScope;
+  productScope: ProductScope | null;
   selectedHospitalId: string;
   session: SessionRecord | null;
   submitPrompt: (prompt: string) => Promise<void>;
@@ -529,6 +561,7 @@ function UserWorkspace({
   hospitalScopeMode,
   isSwitchingProduct,
   metadata,
+  onEnterProduct,
   onAccessModeChange,
   onHospitalChange,
   onHospitalScopeModeChange,
@@ -542,7 +575,7 @@ function UserWorkspace({
   submitPrompt,
   turns,
 }: WorkspaceProps) {
-  const workspace = PRODUCT_WORKSPACES[productScope];
+  const workspace = productScope ? PRODUCT_WORKSPACES[productScope] : null;
   const hospitalName = session?.hospital_name ?? metadata?.default_hospital?.hospital_name ?? "当前医院";
   const overview = session?.overview ?? null;
   const snapshotRange = overview
@@ -565,6 +598,76 @@ function UserWorkspace({
     setExpandedPromptGroups({});
     setShowObjectChoices(false);
   }, [productScope]);
+
+  if (!productScope || !workspace) {
+    return (
+      <div className="user-shell">
+        <header className="user-topbar">
+          <div className="user-brand">
+            <div className="user-brand-mark">YK</div>
+            <div>
+              <div className="user-brand-title">PGT 数据回顾</div>
+              <div className="user-brand-subtitle">选择产品，开始分析</div>
+            </div>
+          </div>
+          <div className="user-topbar-actions">
+            <select
+              className="mode-switch-button"
+              disabled={isSwitchingProduct}
+              value={accessMode}
+              onChange={(event) => onAccessModeChange(event.target.value as DemoAccessMode)}
+            >
+              <option value="single">本院账号</option>
+              <option value="all">内部账号</option>
+            </select>
+          </div>
+        </header>
+
+        <main className="user-main user-main-landing">
+          <section className="user-command-panel user-command-panel-landing">
+            <div className="user-context-row">
+              <div>
+                <div className="user-kicker">选产品</div>
+                <h1>今天要看哪类 PGT 数据？</h1>
+                <p className="user-context-lead">
+                  先选产品，再进入分析。系统会按你选择的产品准备对应数据和推荐问题。
+                </p>
+              </div>
+            </div>
+
+            <div className="product-entry-grid">
+              {PRODUCT_OPTIONS.map((product) => {
+                const entry = PRODUCT_WORKSPACES[product];
+                return (
+                  <button
+                    className="product-entry-card"
+                    key={product}
+                    style={{ "--product-accent": entry.accent } as CSSProperties}
+                    onClick={() => onEnterProduct(product)}
+                    type="button"
+                  >
+                    <span className="product-entry-icon" aria-hidden="true">{entry.icon}</span>
+                    <span className="product-entry-kicker">进入分析</span>
+                    <strong>{entry.portalTitle}</strong>
+                    <span>{entry.portalSubtitle}</span>
+                    <div className="product-entry-tags">
+                      {entry.businessTags.map((item) => (
+                        <span className="product-entry-tag" key={item}>
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {error ? <div className="error-banner">{error}</div> : null}
+          </section>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="user-shell">
@@ -618,6 +721,9 @@ function UserWorkspace({
             <option value="PGT-A">PGT-A</option>
             <option value="PGT-SR">PGT-SR</option>
           </select>
+          <button className="mode-switch-button" onClick={() => onProductChange(null)} type="button">
+            返回产品选择
+          </button>
           <div className={`user-session-pill${isSwitchingProduct ? " user-session-pill-loading" : ""}`}>{sessionStatusText}</div>
           <button className="mode-switch-button" onClick={() => onModeChange("debug")} type="button">
             研发调试
@@ -874,13 +980,6 @@ function SessionOverviewPanel({ overview }: { overview: NonNullable<SessionRecor
         <article className="session-overview-stat session-overview-stat-soft">
           <span className="session-overview-label">每周期平均胚胎</span>
           <strong>{avgEmbryosPerCycle}</strong>
-        </article>
-
-        <article className="session-overview-stat session-overview-stat-range">
-          <span className="session-overview-label">当前产品</span>
-          <strong>
-            {overview.product_scope}
-          </strong>
         </article>
       </div>
     </section>

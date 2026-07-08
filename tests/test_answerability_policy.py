@@ -12,6 +12,7 @@ def _evaluate(
     *,
     hospital_id: str = HOSPITAL_ID,
     hospital_name: str | None = None,
+    context_product_scope: str | None = None,
     hospital_scope_mode: str = "single",
     accessible_hospital_ids: list[str] | None = None,
     can_access_all_hospitals: bool = False,
@@ -19,7 +20,7 @@ def _evaluate(
     resolved_hospital_name = hospital_name or hospital_id
     parsed = intent_parser_service.parse(
         message=message,
-        context=SessionContext(),
+        context=SessionContext(product_scope=context_product_scope),
         hospital_id=hospital_id,
         hospital_name=resolved_hospital_name,
     )
@@ -514,6 +515,62 @@ def test_pgtsr_volume_answers() -> None:
     assert plan.metric_family == "pgtsr_total_volume"
 
 
+def test_pgtsr_euploid_rate_answers() -> None:
+    message = "2025年 PGT-SR 整倍体率"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.metric_id == "pgtsr_euploid_rate"
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_euploid_rate"
+
+
+def test_pgtsr_generic_age_filter_clarifies_age_scope() -> None:
+    message = "2025年 PGT-SR >35岁患者整倍体率"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.age_range == "gt:35"
+    assert parsed.age_scope is None
+    assert plan.answer_mode == "clarify"
+    assert plan.clarify_missing == ["年龄对象"]
+
+
+def test_pgtsr_patient_age_filter_answers() -> None:
+    message = "2025年 PGT-SR 女方年龄>35岁整倍体率"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.age_range == "gt:35"
+    assert parsed.age_scope == "patient"
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_euploid_rate"
+    assert plan.filters["patient_age_range"] == "gt:35"
+
+
+def test_pgtsr_female_age_breakdown_answers_as_patient_scope() -> None:
+    message = "按女性年龄分层统计胚胎整倍体率"
+    parsed, plan = _evaluate(message, context_product_scope="PGT-SR")
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.breakdown == "age"
+    assert parsed.age_scope == "patient"
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_euploid_rate"
+    assert plan.filters["age_scope"] == "patient"
+
+
+def test_pgtsr_age_breakdown_answers() -> None:
+    message = "按年龄分层看一下 PGT-SR 整倍体率"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.breakdown == "age"
+    assert parsed.metric_id == "pgtsr_euploid_rate"
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_euploid_rate"
+
+
 def test_pgtsr_next_step_answers() -> None:
     message = "看一下 PGT-SR 是否进入下一步易位筛查"
     parsed, plan = _evaluate(message)
@@ -533,6 +590,91 @@ def test_pgtsr_cycle_indicator_by_clinical_type_answers() -> None:
     assert plan.answer_mode == "answer"
     assert plan.metric_family == "pgtsr_cycle_indicator_overview"
     assert "sr_clinical_type" not in plan.filters
+
+
+def test_pgtsr_sr_type_embryo_euploid_answers() -> None:
+    message = "罗氏易位、平衡易位、倒位等不同 SR 患者的胚胎整倍体率"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.breakdown == "sr_clinical_type"
+    assert parsed.sr_clinical_type is None
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_euploid_rate"
+    assert "sr_clinical_type" not in plan.filters
+
+
+def test_pgtsr_multiple_sr_types_keep_filter_when_not_asking_breakdown() -> None:
+    message = "罗氏易位、平衡易位患者的胚胎整倍体率"
+    parsed, plan = _evaluate(message, context_product_scope="PGT-SR")
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.breakdown == "overall"
+    assert parsed.sr_clinical_types == ["平衡易位", "罗氏易位"]
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_euploid_rate"
+    assert plan.breakdown == "sr_clinical_type"
+    assert plan.filters["breakdown"] == "sr_clinical_type"
+    assert plan.filters["sr_clinical_types"] == "平衡易位|罗氏易位"
+
+
+def test_pgtsr_indication_alias_embryo_euploid_answers() -> None:
+    message = "按适应症看一下 PGT-SR 整倍体胚胎占比"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.breakdown == "sr_clinical_type"
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_euploid_rate"
+
+
+def test_pgtsr_embryo_euploid_by_clinical_type_answers() -> None:
+    message = "按临床指征看一下 PGT-SR 胚胎整倍体率"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.breakdown == "sr_clinical_type"
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_euploid_rate"
+
+
+def test_pgtsr_embryo_euploid_situation_answers_without_clarify() -> None:
+    message = "看一下 PGT-SR 的胚胎整倍体情况"
+    parsed, plan = _evaluate(message, context_product_scope="PGT-SR")
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.metric_id == "pgtsr_euploid_rate"
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_euploid_rate"
+
+
+def test_pgtsr_clinical_type_euploid_without_object_clarifies() -> None:
+    message = "按临床指征看一下 PGT-SR 整倍体率"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.breakdown == "sr_clinical_type"
+    assert plan.answer_mode == "clarify"
+    assert plan.clarify_missing == ["统计对象"]
+    assert plan.candidate_metric_ids == ["pgtsr_euploid_rate", "pgtsr_cycle_indicator_overview"]
+    assert plan.clarification_question == "这次你想看胚胎层面的整倍体率，还是周期层面的整倍体结局？"
+    assert "按临床指征看一下 PGT-SR 胚胎整倍体率" in plan.suggestions
+    assert "按临床指征看一下 PGT-SR 周期结局" in plan.suggestions
+
+
+def test_pgtsr_workspace_broad_embryo_question_clarifies_with_pgtsr_only_suggestions() -> None:
+    message = "25年7月的胚胎整体情况"
+    parsed, plan = _evaluate(message, context_product_scope="PGT-SR")
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.time_range == "2025年7月"
+    assert plan.answer_mode == "clarify"
+    assert plan.clarify_missing == ["主指标"]
+    assert plan.clarification_question == "请先明确你想看的 PGT-SR 指标，例如送检量、胚胎整倍体率、质控情况、结果分布或周期结局。"
+    assert plan.suggestions
+    assert all("PGT-A" not in suggestion for suggestion in plan.suggestions)
+    assert "看一下 PGT-SR 结果分布" in plan.suggestions
+    assert "看一下 PGT-SR 的胚胎整倍体率" in plan.suggestions
 
 
 def test_pgtsr_marecs_stage2_refuses() -> None:

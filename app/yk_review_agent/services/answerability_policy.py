@@ -52,7 +52,14 @@ class AnswerabilityPolicy:
                 if parsed.age_range
                 else {}
             ),
-            **({"sr_clinical_type": parsed.sr_clinical_type} if parsed.sr_clinical_type else {}),
+            **(
+                {"sr_clinical_type": parsed.sr_clinical_type}
+                if parsed.sr_clinical_type
+                else {"sr_clinical_types": "|".join(parsed.sr_clinical_types)}
+                if parsed.sr_clinical_types and parsed.breakdown != "sr_clinical_type"
+                else {}
+            ),
+            **({"age_scope": parsed.age_scope} if parsed.age_scope else {}),
         }
         time_grain = self._infer_time_grain(parsed.time_range, parsed.breakdown)
         resolution = function_resolver.resolve(message=parsed.normalized_message or message, parsed=parsed)
@@ -89,9 +96,9 @@ class AnswerabilityPolicy:
                     filters=filters,
                     answer_mode="clarify",
                     rationale="当前问题还不够明确，缺少可执行的主指标。",
-                    clarification_question="请先明确你想看的指标，例如送检量、整倍体率、年龄分层、质控情况或结果分布。",
+                    clarification_question=self._missing_metric_question(product_scope),
                     clarify_missing=["主指标"],
-                    suggestions=CLARIFY_PROMPTS,
+                    suggestions=self._clarify_suggestions(product_scope=product_scope),
                     normalized_message=parsed.normalized_message,
                 )
             rationale = (
@@ -117,9 +124,12 @@ class AnswerabilityPolicy:
                 answer_mode="clarify",
                 rationale=parsed.follow_up_resolution.summary or "当前追问还缺少足够的信息。",
                 clarification_question=parsed.follow_up_resolution.clarification_question
-                or "请补充这次想继续看的指标。",
+                or self._missing_metric_question(parsed.product_scope or "PGT-A"),
                 clarify_missing=["主指标"],
-                suggestions=CLARIFY_PROMPTS,
+                suggestions=self._clarify_suggestions(
+                    product_scope=parsed.product_scope or "PGT-A",
+                    candidate_metric_ids=resolution.candidate_metric_ids,
+                ),
                 candidate_metric_ids=resolution.candidate_metric_ids,
                 normalized_message=parsed.normalized_message,
             )
@@ -167,6 +177,13 @@ class AnswerabilityPolicy:
                 normalized_message=parsed.normalized_message,
             )
 
+        if pgt_sr_age_clarify := self._clarify_pgtsr_age_scope(
+            parsed=parsed,
+            filters=filters,
+            time_grain=time_grain,
+        ):
+            return pgt_sr_age_clarify
+
         if object_clarify_plan := self._clarify_ambiguous_euploid_object(
             message=message,
             parsed=parsed,
@@ -186,9 +203,12 @@ class AnswerabilityPolicy:
                 filters=filters,
                 answer_mode="clarify",
                 rationale="当前问题同时落到了多个可执行指标，请先明确你最想看的主指标。",
-                clarification_question="你这次最想先看哪一类指标？",
+                clarification_question=self._multiple_metric_question(product_scope),
                 clarify_missing=["主指标"],
-                suggestions=CLARIFY_PROMPTS,
+                suggestions=self._clarify_suggestions(
+                    product_scope=product_scope,
+                    candidate_metric_ids=candidate_ids,
+                ),
                 candidate_metric_ids=candidate_ids,
                 normalized_message=parsed.normalized_message,
             )
@@ -196,7 +216,7 @@ class AnswerabilityPolicy:
         metric_id = resolution.metric_id if resolution.metric_id else (candidate_ids[0] if candidate_ids else None)
         if metric_id is None:
             clarify_missing = ["主指标"]
-            clarification_question = "请先明确你想看的指标，例如送检量、整倍体率、年龄分层、质控情况或结果分布。"
+            clarification_question = self._missing_metric_question(product_scope)
             rationale = resolution.reason or "当前问题还不够明确，缺少可执行的主指标。"
             if parsed.follow_up_resolution.mode != "none" and not parsed.has_explicit_time_range and not parsed.time_range:
                 clarify_missing = ["时间范围"]
@@ -211,7 +231,10 @@ class AnswerabilityPolicy:
                 rationale=rationale,
                 clarification_question=clarification_question,
                 clarify_missing=clarify_missing,
-                suggestions=CLARIFY_PROMPTS,
+                suggestions=self._clarify_suggestions(
+                    product_scope=product_scope,
+                    candidate_metric_ids=candidate_ids,
+                ),
                 candidate_metric_ids=candidate_ids,
                 normalized_message=parsed.normalized_message,
             )
@@ -230,6 +253,27 @@ class AnswerabilityPolicy:
                 normalized_message=parsed.normalized_message,
             )
 
+        if (
+            product_scope == "PGT-SR"
+            and len(parsed.sr_clinical_types) >= 2
+            and parsed.breakdown == "overall"
+            and metric_id in {"pgtsr_euploid_rate", "pgtsr_cycle_indicator_overview", "pgtsr_next_step_overview"}
+        ):
+            filters["breakdown"] = "sr_clinical_type"
+            filters["sr_clinical_types"] = "|".join(parsed.sr_clinical_types)
+            return AnalysisPlan(
+                product_scope=product_scope,
+                metric_family=metric_id,
+                breakdown="sr_clinical_type",
+                time_grain=time_grain,
+                filters=filters,
+                answer_mode="answer",
+                rationale=f"问题已通过产品范围、数据支撑和组合有效性校验，可执行“{metric.title}”分析。",
+                candidate_metric_ids=candidate_ids,
+                suggestions=self._follow_up_suggestions(metric.metric_id),
+                normalized_message=parsed.normalized_message,
+            )
+
         if product_scope not in metric.supported_products:
             return AnalysisPlan(
                 product_scope=product_scope,
@@ -243,8 +287,9 @@ class AnswerabilityPolicy:
                 normalized_message=parsed.normalized_message,
             )
 
+        auxiliary_filters = {"breakdown", "focus", "hospital_scope_mode", "age_scope", "sr_clinical_types"}
         for filter_name in filters:
-            if filter_name not in metric.supported_filters and filter_name not in {"breakdown", "focus", "hospital_scope_mode"}:
+            if filter_name not in metric.supported_filters and filter_name not in auxiliary_filters:
                 return AnalysisPlan(
                     product_scope=product_scope,
                     breakdown=parsed.breakdown,
@@ -375,7 +420,8 @@ class AnswerabilityPolicy:
             rationale=(
                 "当前请求属于结构化业务统计任务单，不是单一指标问答。"
                 f"已识别产品：{requested_product_text}；已识别指标：{requested_metric_text}。"
-                "当前 V0.2 快照模式已接入多产品文件，但真实执行主链路仍只支持 PGT-A 单指标，不支持跨产品、多指标汇总执行。"
+                "当前 V0.2 快照模式已接入多产品文件，但真实执行主链路仍只支持 PGT-A 与 PGT-SR 的单指标问答，"
+                "不支持跨产品、多指标汇总执行。"
             ),
             suggestions=[
                 "看一下当前快照下的 PGT-A 送检量",
@@ -411,17 +457,48 @@ class AnswerabilityPolicy:
         compact_message = "".join(message.split())
         has_cycle_signal = any(
             term in compact_message
-            for term in ("周期无整倍体", "周期整倍体率", "周期整倍体结局", "周期结局", "周期层面", "从周期角度", "按周期看", "每周期")
+            for term in (
+                "周期无整倍体",
+                "周期整倍体率",
+                "周期整倍体结局",
+                "周期结局",
+                "周期层面",
+                "从周期角度",
+                "按周期看",
+                "每周期",
+                "有整倍体胚胎的周期",
+                "无整倍体周期",
+            )
         )
         has_embryo_signal = any(
-            term in compact_message for term in ("胚胎整倍体率", "胚胎层面", "从胚胎角度", "按胚胎看", "每枚胚胎")
+            term in compact_message
+            for term in (
+                "胚胎整倍体率",
+                "胚胎整倍体情况",
+                "整倍体情况",
+                "整倍体胚胎比例",
+                "整倍体胚胎占比",
+                "每个胚胎",
+                "胚胎层面",
+                "从胚胎角度",
+                "按胚胎看",
+                "每枚胚胎",
+                "需要多少胚胎",
+            )
         )
         has_ambiguous_euploid_term = any(term in compact_message for term in AMBIGUOUS_EUPLOID_OBJECT_TERMS)
+        is_pgtsr_clinical_type_euploid = (
+            parsed.product_scope == "PGT-SR"
+            and parsed.breakdown == "sr_clinical_type"
+            and "整倍体率" in compact_message
+        )
 
-        if has_cycle_signal or has_embryo_signal or not has_ambiguous_euploid_term:
+        if has_cycle_signal or has_embryo_signal or (not has_ambiguous_euploid_term and not is_pgtsr_clinical_type_euploid):
             return None
 
         object_metric_ids = {"pgta_euploid_rate", "pgta_cycle_indicator_overview"}
+        if parsed.product_scope == "PGT-SR":
+            object_metric_ids = {"pgtsr_euploid_rate", "pgtsr_cycle_indicator_overview"}
         if parsed.metric_id not in object_metric_ids and not set(candidate_ids).intersection(object_metric_ids):
             return None
 
@@ -437,12 +514,54 @@ class AnswerabilityPolicy:
             rationale="当前问题已经进入整倍体相关主题，但还缺少“胚胎层面”还是“周期层面”的关键信息。",
             clarification_question="这次你想看胚胎层面的整倍体率，还是周期层面的整倍体结局？",
             clarify_missing=["统计对象"],
+            suggestions=(
+                [
+                    "按临床指征看一下 PGT-SR 胚胎整倍体率",
+                    "按临床指征看一下 PGT-SR 周期结局",
+                    "看一下 PGT-SR 的胚胎整倍体率",
+                ]
+                if parsed.product_scope == "PGT-SR"
+                else [
+                    "看一下 PGT-A 的胚胎整倍体率",
+                    "看一下 PGT-A 的周期无整倍体率",
+                    "看一下 PGT-A 的周期整倍体结局",
+                ]
+            ),
+            candidate_metric_ids=(
+                ["pgtsr_euploid_rate", "pgtsr_cycle_indicator_overview"]
+                if parsed.product_scope == "PGT-SR"
+                else ["pgta_euploid_rate", "pgta_cycle_indicator_overview"]
+            ),
+            normalized_message=parsed.normalized_message,
+        )
+
+    def _clarify_pgtsr_age_scope(
+        self,
+        *,
+        parsed: ParsedIntent,
+        filters: dict[str, str],
+        time_grain: str,
+    ) -> AnalysisPlan | None:
+        if parsed.product_scope != "PGT-SR":
+            return None
+        if parsed.age_range is None:
+            return None
+        if parsed.age_scope is not None:
+            return None
+        return AnalysisPlan(
+            product_scope="PGT-SR",
+            breakdown=parsed.breakdown,
+            time_grain=time_grain,
+            filters=filters,
+            answer_mode="clarify",
+            rationale="PGT-SR 同时存在女方年龄和男方年龄两个字段，当前年龄条件还缺少筛选对象。",
+            clarification_question="这次年龄条件是指女方年龄，还是男方年龄？",
+            clarify_missing=["年龄对象"],
             suggestions=[
-                "看一下 PGT-A 的胚胎整倍体率",
-                "看一下 PGT-A 的周期无整倍体率",
-                "看一下 PGT-A 的周期整倍体结局",
+                "看一下女方年龄35岁以上的 PGT-SR 整倍体率",
+                "看一下男方年龄35岁以上的 PGT-SR 整倍体率",
+                "按年龄分层看一下 PGT-SR 整倍体率",
             ],
-            candidate_metric_ids=["pgta_euploid_rate", "pgta_cycle_indicator_overview"],
             normalized_message=parsed.normalized_message,
         )
 
@@ -456,6 +575,64 @@ class AnswerabilityPolicy:
         if has_result and has_quality:
             return "当前第一版不支持把结果分布和质控分布做组合分析，请分别查询结果分布或质控情况。"
         return None
+
+    def _missing_metric_question(self, product_scope: str) -> str:
+        if product_scope == "PGT-SR":
+            return "请先明确你想看的 PGT-SR 指标，例如送检量、胚胎整倍体率、质控情况、结果分布或周期结局。"
+        if product_scope == "PGT-A":
+            return "请先明确你想看的 PGT-A 指标，例如送检量、整倍体率、年龄分层、质控情况或结果分布。"
+        return "请先明确你想看的产品和主指标，例如 PGT-A 送检量或 PGT-SR 结果分布。"
+
+    def _multiple_metric_question(self, product_scope: str) -> str:
+        if product_scope in {"PGT-A", "PGT-SR"}:
+            return f"你这次最想先看哪一类 {product_scope} 指标？"
+        return "你这次最想先看哪一类指标？"
+
+    def _clarify_suggestions(
+        self,
+        *,
+        product_scope: str,
+        candidate_metric_ids: list[str] | None = None,
+    ) -> list[str]:
+        by_metric = {
+            "pgt_total_volume": "看一下当前快照下的 PGT-A 送检量",
+            "pgta_euploid_rate": "看一下 PGT-A 的胚胎整倍体率",
+            "pgta_quality_overview": "看一下当前快照下的 PGT-A 质控情况",
+            "pgta_mosaic_abnormal": "看一下 PGT-A 的结果分布",
+            "pgta_cycle_indicator_overview": "看一下 PGT-A 的周期整倍体结局",
+            "pgta_special_cnv_overview": "看一下 PGT-A 的特殊 CNV 提示情况",
+            "pgtsr_total_volume": "看一下当前快照下的 PGT-SR 送检量",
+            "pgtsr_euploid_rate": "看一下 PGT-SR 的胚胎整倍体率",
+            "pgtsr_quality_overview": "看一下 PGT-SR 质控情况",
+            "pgtsr_result_overview": "看一下 PGT-SR 结果分布",
+            "pgtsr_cycle_indicator_overview": "看一下 PGT-SR 周期结局",
+            "pgtsr_next_step_overview": "看一下 PGT-SR 是否进入下一步易位筛查",
+        }
+        product_defaults = {
+            "PGT-A": [
+                "看一下当前快照下的 PGT-A 送检量",
+                "看一下 PGT-A 的胚胎整倍体率",
+                "按年龄分层看一下 PGT-A 的整倍体率",
+                "看一下当前快照下的 PGT-A 质控情况",
+                "看一下 PGT-A 的结果分布",
+                "看一下 PGT-A 的周期整倍体结局",
+            ],
+            "PGT-SR": [
+                "看一下 PGT-SR 结果分布",
+                "看一下 PGT-SR 的胚胎整倍体率",
+                "看一下当前快照下的 PGT-SR 送检量",
+                "看一下 PGT-SR 质控情况",
+                "看一下 PGT-SR 周期结局",
+                "看一下 PGT-SR 是否进入下一步易位筛查",
+            ],
+        }
+        suggestions: list[str] = []
+        for metric_id in candidate_metric_ids or []:
+            suggestion = by_metric.get(metric_id)
+            if suggestion:
+                suggestions.append(suggestion)
+        suggestions.extend(product_defaults.get(product_scope, CLARIFY_PROMPTS))
+        return list(dict.fromkeys(suggestions))
 
     def _infer_time_grain(self, time_range: str, breakdown: str) -> str:
         if breakdown == "age":
@@ -519,6 +696,11 @@ class AnswerabilityPolicy:
                 "补充 PGT-A 的特殊 CNV 提示情况",
                 "再看一下 PGT-A 的质控情况",
             ],
+            "pgtsr_euploid_rate": [
+                "按临床指征统计下 PGT-SR 胚胎整倍体率",
+                "按临床指征看一下 PGT-SR 周期整倍体率情况",
+                "PGT-SR 中罗氏易位患者的胚胎整倍体率情况",
+            ],
             "pgtsr_total_volume": [
                 "看一下 PGT-SR 质控情况",
                 "看一下 PGT-SR 结果分布",
@@ -530,9 +712,9 @@ class AnswerabilityPolicy:
                 "按临床指征看一下 PGT-SR 周期结局",
             ],
             "pgtsr_cycle_indicator_overview": [
-                "按临床指征看一下 PGT-SR 周期结局",
-                "看一下 PGT-SR 是否进入下一步易位筛查",
-                "看一下 PGT-SR 结果分布",
+                "按临床指征统计下 PGT-SR 胚胎整倍体率",
+                "PGT-SR 中罗氏易位患者的胚胎整倍体率情况",
+                "罗氏易位、平衡易位、倒位等不同 SR 患者的胚胎整倍体率",
             ],
         }
         return mapping.get(metric_id, CLARIFY_PROMPTS)

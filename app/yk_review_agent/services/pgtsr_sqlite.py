@@ -114,9 +114,12 @@ def create_pgtsr_snapshot_schema(database_url: str) -> None:
 
 
 class PGTSRExcelImporter:
-    def __init__(self, database_url: str) -> None:
+    def __init__(self, database_url: str, source_files: list[str] | None = None) -> None:
         self.database_url = database_url
-        self.source_file = Path(settings.pgtsr_snapshot_file).resolve()
+        configured_files = source_files or [settings.pgtsr_snapshot_file]
+        self.source_files = [Path(path).resolve() for path in configured_files]
+        self.data_sheet_name = ""
+        self.project_sheet_name = ""
 
     def rebuild(self) -> None:
         create_pgtsr_snapshot_schema(self.database_url)
@@ -127,69 +130,69 @@ class PGTSRExcelImporter:
         self._import_workbook()
 
     def _import_workbook(self) -> None:
-        if not self.source_file.exists():
-            raise RuntimeError(f"PGTSR source file not found: {self.source_file}")
+        for source_file in self.source_files:
+            if not source_file.exists():
+                raise RuntimeError(f"PGTSR source file not found: {source_file}")
 
-        started_at = datetime.utcnow().isoformat(sep=" ")
-        with _connect(self.database_url) as conn:
-            cursor = conn.execute(
-                f"""
-                INSERT INTO {IMPORT_BATCH_TABLE} (
-                    product_code, table_name, source_file_name, source_sheet_name,
-                    source_file_size, source_file_mtime, import_started_at, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    "PGT-SR",
-                    PGTSR_TABLE_NAME,
-                    self.source_file.name,
-                    "2025年-数据 + 2025年-项目",
-                    self.source_file.stat().st_size,
-                    datetime.fromtimestamp(self.source_file.stat().st_mtime).isoformat(sep=" "),
-                    started_at,
-                    "running",
-                ),
-            )
-            batch_id = int(cursor.lastrowid)
-            conn.commit()
-
-        raw_count = 0
-        loaded_count = 0
-        status = "success"
-        notes = ""
-        try:
-            raw_count, loaded_count = self._import_rows(batch_id)
-        except Exception as exc:
-            status = "failed"
-            notes = str(exc)
-            raise
-        finally:
+            workbook = load_workbook(source_file, read_only=True, data_only=True)
+            self.data_sheet_name, self.project_sheet_name = self._resolve_sheet_names(workbook.sheetnames)
+            started_at = datetime.utcnow().isoformat(sep=" ")
             with _connect(self.database_url) as conn:
-                conn.execute(
+                cursor = conn.execute(
                     f"""
-                    UPDATE {IMPORT_BATCH_TABLE}
-                    SET import_finished_at = ?, row_count_raw = ?, row_count_loaded = ?, status = ?, notes = ?
-                    WHERE id = ?
+                    INSERT INTO {IMPORT_BATCH_TABLE} (
+                        product_code, table_name, source_file_name, source_sheet_name,
+                        source_file_size, source_file_mtime, import_started_at, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        datetime.utcnow().isoformat(sep=" "),
-                        raw_count,
-                        loaded_count,
-                        status,
-                        notes,
-                        batch_id,
+                        "PGT-SR",
+                        PGTSR_TABLE_NAME,
+                        source_file.name,
+                        f"{self.data_sheet_name} + {self.project_sheet_name}" if self.project_sheet_name else self.data_sheet_name,
+                        source_file.stat().st_size,
+                        datetime.fromtimestamp(source_file.stat().st_mtime).isoformat(sep=" "),
+                        started_at,
+                        "running",
                     ),
                 )
+                batch_id = int(cursor.lastrowid)
                 conn.commit()
 
-    def _import_rows(self, batch_id: int) -> tuple[int, int]:
-        workbook = load_workbook(self.source_file, read_only=True, data_only=True)
-        if "2025年-数据" not in workbook.sheetnames:
-            raise RuntimeError("PGTSR workbook must contain 2025年-数据 sheet.")
+            raw_count = 0
+            loaded_count = 0
+            status = "success"
+            notes = ""
+            try:
+                raw_count, loaded_count = self._import_rows(batch_id, workbook=workbook, source_file=source_file)
+            except Exception as exc:
+                status = "failed"
+                notes = str(exc)
+                raise
+            finally:
+                with _connect(self.database_url) as conn:
+                    conn.execute(
+                        f"""
+                        UPDATE {IMPORT_BATCH_TABLE}
+                        SET import_finished_at = ?, row_count_raw = ?, row_count_loaded = ?, status = ?, notes = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            datetime.utcnow().isoformat(sep=" "),
+                            raw_count,
+                            loaded_count,
+                            status,
+                            notes,
+                            batch_id,
+                        ),
+                    )
+                    conn.commit()
+                workbook.close()
 
+    def _import_rows(self, batch_id: int, *, workbook, source_file: Path) -> tuple[int, int]:
         project_map: dict[str, dict[str, str]] = {}
-        if "2025年-项目" in workbook.sheetnames:
-            project_sheet = workbook["2025年-项目"]
+        if self.project_sheet_name:
+            project_sheet = workbook[self.project_sheet_name]
             project_header = next(project_sheet.iter_rows(min_row=1, max_row=1, values_only=True))
             project_index = {
                 _normalize_header(value): position
@@ -203,11 +206,12 @@ class PGTSRExcelImporter:
                 if not cycle_id:
                     continue
                 project_map[str(cycle_id).strip()] = {
-                    "sr_clinical_type": _normalize_text(self._raw(project_index, row, "临床指征")),
+                    "sr_clinical_type": _normalize_text(self._raw(project_index, row, "临床指征"))
+                    or _normalize_text(self._raw(project_index, row, "临床指征（人工处理）")),
                     "next_step_screening": _normalize_text(self._raw(project_index, row, "是否进入下一步易位筛查")),
                 }
 
-        data_sheet = workbook["2025年-数据"]
+        data_sheet = workbook[self.data_sheet_name]
         data_header = next(data_sheet.iter_rows(min_row=1, max_row=1, values_only=True))
         data_index = {
             _normalize_header(value): position
@@ -221,6 +225,7 @@ class PGTSRExcelImporter:
             mapped = self._map_row(batch_id=batch_id, source_row_num=row_number, index=data_index, row=row, project_map=project_map)
             if mapped is None:
                 continue
+            mapped["source_file_name"] = source_file.name
             rows.append(mapped)
         self._insert_rows(rows)
         return raw_count, len(rows)
@@ -264,8 +269,8 @@ class PGTSRExcelImporter:
         sample_type = _normalize_sample_type(self._raw(index, row, "样本类型"))
         values: dict[str, Any] = {
             "import_batch_id": batch_id,
-            "source_file_name": self.source_file.name,
-            "source_sheet_name": "2025年-数据",
+            "source_file_name": "",
+            "source_sheet_name": self.data_sheet_name,
             "source_row_num": source_row_num,
             "imported_at": datetime.utcnow().isoformat(sep=" "),
             "month_bucket": _normalize_month_bucket_value(self._raw(index, row, "月份")) or created_at.strftime("%Y-%m"),
@@ -291,6 +296,13 @@ class PGTSRExcelImporter:
         if "对照" in sample_type or "极体" in sample_type:
             return None
         return values
+
+    def _resolve_sheet_names(self, sheet_names: list[str]) -> tuple[str, str]:
+        data_sheet_name = next((name for name in sheet_names if name.endswith("-数据")), "")
+        if not data_sheet_name:
+            raise RuntimeError("PGTSR workbook must contain a '*-数据' sheet.")
+        project_sheet_name = next((name for name in sheet_names if name.endswith("-项目")), "")
+        return data_sheet_name, project_sheet_name
 
     def _insert_rows(self, rows: list[dict[str, Any]]) -> None:
         if not rows:

@@ -81,6 +81,8 @@ class QueryService:
             spouse_age_range=filters.get("spouse_age_range"),
             sr_clinical_type=filters.get("sr_clinical_type"),
         )
+        if sr_clinical_types := _parse_multi_value_filter(filters.get("sr_clinical_types")):
+            records = [item for item in records if item.sr_clinical_type in sr_clinical_types]
         if not records:
             return {
                 "metric_id": metric_id,
@@ -97,6 +99,8 @@ class QueryService:
 
         if metric_id == "pgtsr_quality_overview":
             return self._pgtsr_quality_overview(records, filters, breakdown)
+        if metric_id == "pgtsr_euploid_rate":
+            return self._pgtsr_euploid_rate(records, filters, breakdown)
         if metric_id == "pgtsr_result_overview":
             return self._pgtsr_result_overview(records, filters, breakdown)
         if metric_id == "pgtsr_cycle_indicator_overview":
@@ -503,7 +507,7 @@ class QueryService:
         cycle_count = len({item.cycle_id for item in records})
         embryo_count = len(records)
         avg_embryos = embryo_count / cycle_count if cycle_count else 0.0
-        grouped = _group_pgtsr_records(records, breakdown if breakdown in {"month", "quarter", "day"} else "overall")
+        grouped = _group_pgtsr_records(records, breakdown if breakdown in {"month", "quarter", "day", "sr_clinical_type"} else "overall")
         rows = []
         categories: list[str] = []
         embryo_values: list[float] = []
@@ -601,14 +605,137 @@ class QueryService:
             "chart": chart,
         }
 
+    def _pgtsr_euploid_rate(self, records: list[PGTSRRecord], filters: dict[str, str], breakdown: str) -> dict:
+        if breakdown == "age":
+            return self._pgtsr_age_distribution(records, filters)
+
+        group_breakdown = breakdown if breakdown in {"month", "quarter", "day", "sr_clinical_type"} else "overall"
+        grouped = _group_pgtsr_records(records, group_breakdown)
+        rows = []
+        categories: list[str] = []
+        values: list[float] = []
+        for key, bucket in grouped.items():
+            total = len(bucket)
+            euploid = sum(1 for item in bucket if item.is_euploid)
+            rate_value = _pct_value(euploid, total)
+            rows.append([key, total, euploid, f"{rate_value:.1f}%"])
+            if group_breakdown != "overall":
+                categories.append(key)
+                values.append(round(rate_value, 1))
+
+        total = len(records)
+        euploid = sum(1 for item in records if item.is_euploid)
+        chart = None
+        if categories:
+            chart = {
+                "title": "PGT-SR 整倍体率",
+                "chart_type": "bar",
+                "categories": categories,
+                "series": [{"name": "整倍体率", "values": values}],
+            }
+        return {
+            "metric_id": "pgtsr_euploid_rate",
+            "filters": filters,
+            "summary": (
+                f"当前快照下，PGT-SR 胚胎层面共检测 {total} 个胚胎，其中整倍体 {euploid} 个，"
+                f"整倍体率为 {_pct(euploid, total)}。"
+            ),
+            "evidence": {
+                "status": "ready",
+                "record_count": total,
+                "euploid_count": euploid,
+                "breakdown": breakdown,
+                "warnings": ["当前 PGT-SR 的整倍体率按结果解释中的“未见异常”口径统计。"],
+            },
+            "table": {
+                "title": self._pgtsr_rate_table_title(breakdown),
+                "columns": [self._breakdown_label(breakdown), "检测胚胎数", "整倍体胚胎数", "整倍体率"],
+                "rows": rows,
+            },
+            "chart": chart,
+        }
+
+    def _pgtsr_age_distribution(self, records: list[PGTSRRecord], filters: dict[str, str]) -> dict:
+        age_scope = filters.get("age_scope")
+        if age_scope == "patient":
+            subjects = (("女方", lambda item: item.patient_age),)
+            title = "PGT-SR 女方年龄分层整倍体率"
+            summary = "已按女方年龄对当前 PGT-SR 快照做分层，可用于观察不同年龄段的周期量和整倍体率差异。"
+        elif age_scope == "spouse":
+            subjects = (("男方", lambda item: item.spouse_age),)
+            title = "PGT-SR 男方年龄分层整倍体率"
+            summary = "已按男方年龄对当前 PGT-SR 快照做分层，可用于观察不同年龄段的周期量和整倍体率差异。"
+        else:
+            subjects = (
+                ("女方", lambda item: item.patient_age),
+                ("男方", lambda item: item.spouse_age),
+            )
+            title = "PGT-SR 双年龄分层整倍体率"
+            summary = "已按女方年龄和男方年龄分别对当前 PGT-SR 快照做分层，可用于观察不同年龄段的周期量和整倍体率差异。"
+
+        rows = []
+        chart_categories: list[str] = []
+        chart_values: list[float] = []
+        for subject_label, age_getter in subjects:
+            grouped = {
+                "＜35岁": [],
+                "35-38岁": [],
+                "＞38岁": [],
+                "未填写": [],
+            }
+            for item in records:
+                grouped[_pgtsr_age_bucket_label(age_getter(item))].append(item)
+
+            for age_label, items in grouped.items():
+                if not items:
+                    continue
+                cycles = len({item.cycle_id for item in items})
+                embryos = len(items)
+                euploid = sum(1 for item in items if item.is_euploid)
+                rate = _pct_value(euploid, embryos)
+                rows.append([subject_label, age_label, cycles, embryos, euploid, f"{rate:.1f}%"])
+                if age_label != "未填写":
+                    chart_categories.append(f"{subject_label}{age_label}")
+                    chart_values.append(round(rate, 1))
+
+        return {
+            "metric_id": "pgtsr_euploid_rate",
+            "filters": filters,
+            "summary": summary,
+            "evidence": {
+                "status": "ready",
+                "record_count": len(records),
+                "group_count": len(rows),
+                "breakdown": "age",
+                "warnings": ["当前 PGT-SR 的年龄分层统一沿用 ＜35岁、35-38岁、＞38岁 三档口径。"],
+            },
+            "table": {
+                "title": title,
+                "columns": ["年龄对象", "年龄段", "检测周期数", "检测胚胎数", "整倍体胚胎数", "整倍体率"],
+                "rows": rows,
+            },
+            "chart": {
+                "title": title,
+                "chart_type": "bar",
+                "categories": chart_categories,
+                "series": [{"name": "整倍体率", "values": chart_values}],
+            },
+        }
+
     def _pgtsr_result_overview(self, records: list[PGTSRRecord], filters: dict[str, str], breakdown: str) -> dict:
         labels = ("未见异常", "嵌合异常", "异常", "质控不合格")
+        display_labels = {
+            "未见异常": "整倍体",
+            "嵌合异常": "嵌合异常",
+            "异常": "异常",
+            "质控不合格": "质控不合格",
+        }
         if breakdown == "result":
             rows = []
             total = len(records)
             for label in labels:
                 count = sum(1 for item in records if item.result_label == label)
-                rows.append([label, count, _pct(count, total)])
+                rows.append([display_labels[label], count, _pct(count, total)])
             chart = {
                 "title": "PGT-SR 结果结构分布",
                 "chart_type": "bar",
@@ -627,7 +754,7 @@ class QueryService:
         rows = []
         for label in labels:
             count = sum(1 for item in records if item.result_label == label)
-            rows.append([label, count, _pct(count, total)])
+            rows.append([display_labels[label], count, _pct(count, total)])
         chart = {
             "title": "PGT-SR 结果指标总览",
             "chart_type": "bar",
@@ -637,7 +764,7 @@ class QueryService:
         return {
             "metric_id": "pgtsr_result_overview",
             "filters": filters,
-            "summary": f"当前快照下，PGT-SR 未见异常占比为 {rows[0][2]}，嵌合异常占比为 {rows[1][2]}，异常占比为 {rows[2][2]}。",
+            "summary": f"当前快照下，PGT-SR 整倍体占比为 {rows[0][2]}，嵌合异常占比为 {rows[1][2]}，异常占比为 {rows[2][2]}。",
             "evidence": {"status": "ready", "record_count": total, "breakdown": breakdown},
             "table": {"title": "PGT-SR 结果指标总览", "columns": ["指标", "样本数", "占比"], "rows": rows},
             "chart": chart,
@@ -664,19 +791,19 @@ class QueryService:
         chart = None
         if len(categories) > 1:
             chart = {
-                "title": "PGT-SR 周期存在未见异常胚胎占比",
+                "title": "PGT-SR 周期存在整倍体胚胎占比",
                 "chart_type": "bar",
                 "categories": categories,
-                "series": [{"name": "周期存在未见异常胚胎占比", "values": values}],
+                "series": [{"name": "周期存在整倍体胚胎占比", "values": values}],
             }
         return {
             "metric_id": "pgtsr_cycle_indicator_overview",
             "filters": filters,
-            "summary": f"当前快照下，PGT-SR 共覆盖 {len({item.cycle_id for item in records})} 个检测周期，已统计周期是否存在未见异常胚胎的结局差异。",
+            "summary": f"当前快照下，PGT-SR 周期层面共覆盖 {len({item.cycle_id for item in records})} 个检测周期，已统计周期是否存在整倍体胚胎的结局差异。",
             "evidence": {"status": "ready", "record_count": len(records), "cycle_count": len({item.cycle_id for item in records}), "breakdown": breakdown},
             "table": {
                 "title": "PGT-SR 周期结局总览",
-                "columns": [self._breakdown_label(group_breakdown), "检测周期数", "周期有未见异常胚胎占比", "周期无未见异常胚胎占比"],
+                "columns": [self._breakdown_label(group_breakdown), "检测周期数", "周期有整倍体胚胎占比", "周期无整倍体胚胎占比"],
                 "rows": rows,
             },
             "chart": chart,
@@ -783,6 +910,16 @@ class QueryService:
         }
         return mapping.get(breakdown, "PGT-A 整倍体率")
 
+    def _pgtsr_rate_table_title(self, breakdown: str) -> str:
+        mapping = {
+            "month": "PGT-SR 分月份整倍体率",
+            "quarter": "PGT-SR 分季度整倍体率",
+            "day": "PGT-SR 分日期整倍体率",
+            "sr_clinical_type": "PGT-SR 临床指征分层整倍体率",
+            "overall": "PGT-SR 整倍体率总览",
+        }
+        return mapping.get(breakdown, "PGT-SR 整倍体率总览")
+
 
 query_service = QueryService()
 
@@ -851,6 +988,16 @@ def _pgtsr_month_bucket_parts(item: PGTSRRecord) -> tuple[int, int]:
         except ValueError:
             continue
     return item.created_at.year, item.created_at.month
+
+
+def _pgtsr_age_bucket_label(age: int | None) -> str:
+    if age is None:
+        return "未填写"
+    if age < 35:
+        return "＜35岁"
+    if age <= 38:
+        return "35-38岁"
+    return "＞38岁"
 
 
 def _parse_time_filter(text: str) -> dict[str, int | date | None]:
@@ -1016,6 +1163,12 @@ def _pct_value(numerator: int, denominator: int) -> float:
 
 def _pct(numerator: int, denominator: int) -> str:
     return f"{_pct_value(numerator, denominator):.1f}%"
+
+
+def _parse_multi_value_filter(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item for item in value.split("|") if item]
 
 
 def _ratio_value(text: str) -> float:

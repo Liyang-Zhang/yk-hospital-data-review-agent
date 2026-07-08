@@ -219,6 +219,258 @@ def test_special_cnv_oral_question_returns_special_cnv_result_card() -> None:
     assert any(card.title == "PGT-A 特殊 CNV 提示总览" for card in response.result_cards)
 
 
+def test_pgtsr_euploid_rate_returns_result_cards() -> None:
+    session = session_store.create_session(
+        SessionCreateRequest(
+            user_id="demo-user",
+            hospital_id=HOSPITAL_ID,
+            hospital_name="中国人民解放军医院301医院",
+            host_session_id="host-session-pgtsr-euploid",
+        )
+    )
+    host_context = HostContext(
+        user_id="demo-user",
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+        host_session_id="host-session-pgtsr-euploid",
+    )
+
+    response = conversation_agent.handle(
+        ChatRequest(
+            session_id=session.session_id,
+            message="看一下 PGT-SR 的整倍体率",
+            host_context=host_context,
+        ),
+        session,
+    )
+
+    assert response.structured_answer.answer_mode == "answer"
+    assert response.structured_answer.metric_ids == ["pgtsr_euploid_rate"]
+    assert response.route_trace is not None
+    assert response.route_trace.resolved_metric_id == "pgtsr_euploid_rate"
+    assert any(card.title == "PGT-SR 整倍体率总览" for card in response.result_cards)
+
+
+def test_pgtsr_embryo_euploid_by_clinical_type_returns_grouped_result_card() -> None:
+    session = session_store.create_session(
+        SessionCreateRequest(
+            user_id="demo-user",
+            hospital_id=HOSPITAL_ID,
+            hospital_name="中国人民解放军医院301医院",
+            host_session_id="host-session-pgtsr-clinical-embryo",
+        )
+    )
+    host_context = HostContext(
+        user_id="demo-user",
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+        host_session_id="host-session-pgtsr-clinical-embryo",
+    )
+
+    response = conversation_agent.handle(
+        ChatRequest(
+            session_id=session.session_id,
+            message="按临床指征看一下 PGT-SR 胚胎整倍体率",
+            host_context=host_context,
+        ),
+        session,
+    )
+
+    table_cards = [card for card in response.result_cards if card.table is not None]
+    assert response.structured_answer.answer_mode == "answer"
+    assert response.structured_answer.metric_ids == ["pgtsr_euploid_rate"]
+    assert response.route_trace is not None
+    assert response.route_trace.resolved_metric_id == "pgtsr_euploid_rate"
+    assert response.route_trace.filters["breakdown"] == "sr_clinical_type"
+    assert table_cards
+    assert table_cards[0].table is not None
+    assert table_cards[0].table.title == "PGT-SR 临床指征分层整倍体率"
+    assert table_cards[0].table.columns[0] == "临床指征"
+    assert all(row[0] != "总体" for row in table_cards[0].table.rows)
+
+
+def test_pgtsr_clinical_type_euploid_without_object_returns_clarify_payload() -> None:
+    session = session_store.create_session(
+        SessionCreateRequest(
+            user_id="demo-user",
+            hospital_id=HOSPITAL_ID,
+            hospital_name="中国人民解放军医院301医院",
+            host_session_id="host-session-pgtsr-clinical-object-clarify",
+        )
+    )
+    host_context = HostContext(
+        user_id="demo-user",
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+        host_session_id="host-session-pgtsr-clinical-object-clarify",
+    )
+
+    response = conversation_agent.handle(
+        ChatRequest(
+            session_id=session.session_id,
+            message="按临床指征看一下 PGT-SR 整倍体率",
+            host_context=host_context,
+        ),
+        session,
+    )
+
+    assert response.structured_answer.answer_mode == "clarify"
+    assert response.clarify_payload is not None
+    assert response.clarify_payload.clarify_type == "ambiguous_object"
+    assert response.clarify_payload.question == "这次你想看胚胎层面的整倍体率，还是周期层面的整倍体结局？"
+    assert "按临床指征看一下 PGT-SR 胚胎整倍体率" in response.clarify_payload.options
+    assert "按临床指征看一下 PGT-SR 周期结局" in response.clarify_payload.options
+    assert response.route_trace is not None
+    assert response.route_trace.filters["breakdown"] == "sr_clinical_type"
+
+
+def test_pgtsr_specific_sr_types_embryo_euploid_keeps_subset_filter() -> None:
+    session = session_store.create_session(
+        SessionCreateRequest(
+            user_id="demo-user",
+            hospital_id=HOSPITAL_ID,
+            hospital_name="中国人民解放军医院301医院",
+            host_session_id="host-session-pgtsr-specific-types",
+            product_scope="PGT-SR",
+        )
+    )
+    host_context = HostContext(
+        user_id="demo-user",
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+        host_session_id="host-session-pgtsr-specific-types",
+    )
+
+    response = conversation_agent.handle(
+        ChatRequest(
+            session_id=session.session_id,
+            message="罗氏易位、平衡易位患者的胚胎整倍体率",
+            host_context=host_context,
+        ),
+        session,
+    )
+
+    table_cards = [card for card in response.result_cards if card.table is not None]
+    assert response.structured_answer.answer_mode == "answer"
+    assert response.route_trace is not None
+    assert response.route_trace.resolved_metric_id == "pgtsr_euploid_rate"
+    assert response.route_trace.filters["breakdown"] == "sr_clinical_type"
+    assert response.route_trace.filters["sr_clinical_types"] == "平衡易位|罗氏易位"
+    assert table_cards
+    assert table_cards[0].table is not None
+    assert table_cards[0].table.title == "PGT-SR 临床指征分层整倍体率"
+    row_labels = [row[0] for row in table_cards[0].table.rows]
+    assert set(row_labels) == {"平衡易位", "罗氏易位"}
+
+
+def test_pgtsr_female_age_breakdown_returns_patient_only_rows() -> None:
+    session = session_store.create_session(
+        SessionCreateRequest(
+            user_id="demo-user",
+            hospital_id=HOSPITAL_ID,
+            hospital_name="中国人民解放军医院301医院",
+            host_session_id="host-session-pgtsr-female-age-breakdown",
+            product_scope="PGT-SR",
+        )
+    )
+    host_context = HostContext(
+        user_id="demo-user",
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+        host_session_id="host-session-pgtsr-female-age-breakdown",
+    )
+
+    response = conversation_agent.handle(
+        ChatRequest(
+            session_id=session.session_id,
+            message="按女性年龄分层统计胚胎整倍体率",
+            host_context=host_context,
+        ),
+        session,
+    )
+
+    table_cards = [card for card in response.result_cards if card.table is not None]
+    assert response.structured_answer.answer_mode == "answer"
+    assert response.route_trace is not None
+    assert response.route_trace.resolved_metric_id == "pgtsr_euploid_rate"
+    assert response.route_trace.filters["breakdown"] == "age"
+    assert response.route_trace.filters["age_scope"] == "patient"
+    assert table_cards
+    assert table_cards[0].table is not None
+    assert table_cards[0].table.title == "PGT-SR 女方年龄分层整倍体率"
+    assert all(row[0] == "女方" for row in table_cards[0].table.rows)
+
+
+def test_pgtsr_workspace_broad_embryo_question_clarifies_without_pgta_options() -> None:
+    session = session_store.create_session(
+        SessionCreateRequest(
+            user_id="demo-user",
+            hospital_id=HOSPITAL_ID,
+            hospital_name="中国人民解放军医院301医院",
+            host_session_id="host-session-pgtsr-broad-embryo",
+            product_scope="PGT-SR",
+        )
+    )
+    host_context = HostContext(
+        user_id="demo-user",
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+        host_session_id="host-session-pgtsr-broad-embryo",
+    )
+
+    response = conversation_agent.handle(
+        ChatRequest(
+            session_id=session.session_id,
+            message="25年7月的胚胎整体情况",
+            host_context=host_context,
+        ),
+        session,
+    )
+
+    assert response.structured_answer.answer_mode == "clarify"
+    assert response.clarify_payload is not None
+    assert response.clarify_payload.clarify_type == "missing_metric"
+    assert response.route_trace is not None
+    assert response.route_trace.filters["time_range"] == "2025年7月"
+    assert response.route_trace.filters["breakdown"] == "overall"
+    assert all("PGT-A" not in option for option in response.clarify_payload.options)
+    assert "看一下 PGT-SR 结果分布" in response.clarify_payload.options
+    assert "看一下 PGT-SR 的胚胎整倍体率" in response.clarify_payload.options
+
+
+def test_pgtsr_embryo_euploid_situation_returns_answer() -> None:
+    session = session_store.create_session(
+        SessionCreateRequest(
+            user_id="demo-user",
+            hospital_id=HOSPITAL_ID,
+            hospital_name="中国人民解放军医院301医院",
+            host_session_id="host-session-pgtsr-euploid-situation",
+            product_scope="PGT-SR",
+        )
+    )
+    host_context = HostContext(
+        user_id="demo-user",
+        hospital_id=HOSPITAL_ID,
+        hospital_name="中国人民解放军医院301医院",
+        host_session_id="host-session-pgtsr-euploid-situation",
+    )
+
+    response = conversation_agent.handle(
+        ChatRequest(
+            session_id=session.session_id,
+            message="看一下 PGT-SR 的胚胎整倍体情况",
+            host_context=host_context,
+        ),
+        session,
+    )
+
+    assert response.structured_answer.answer_mode == "answer"
+    assert response.structured_answer.metric_ids == ["pgtsr_euploid_rate"]
+    assert response.route_trace is not None
+    assert response.route_trace.resolved_metric_id == "pgtsr_euploid_rate"
+    assert response.clarify_payload is None
+
+
 def test_special_cnv_ambiguous_question_clarifies() -> None:
     session = session_store.create_session(
         SessionCreateRequest(

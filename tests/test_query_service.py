@@ -4,6 +4,7 @@ import pytest
 
 from yk_review_agent.services.pgta_detail_dataset import DetailRecord
 from yk_review_agent.services.pgta_record_source import get_pgta_record_source
+from yk_review_agent.services.pgtsr_record_source import get_pgtsr_record_source
 from yk_review_agent.services.query_service import (
     _is_incidental_mosaic_cnv,
     _is_pseudoautosomal_deletion,
@@ -223,6 +224,97 @@ def test_pgtsr_volume_returns_expected_shape() -> None:
     assert result["table"]["rows"]
 
 
+def test_pgtsr_euploid_rate_returns_expected_shape() -> None:
+    result = query_service.run(
+        "pgtsr_euploid_rate",
+        {**BASE_FILTERS, "time_range": "当前快照全部时间", "breakdown": "month", "focus": "trend"},
+    )
+
+    assert result["metric_id"] == "pgtsr_euploid_rate"
+    assert result["table"]["title"] == "PGT-SR 分月份整倍体率"
+    assert result["table"]["rows"]
+
+
+def test_pgtsr_euploid_rate_supports_age_breakdown() -> None:
+    result = query_service.run(
+        "pgtsr_euploid_rate",
+        {**BASE_FILTERS, "time_range": "2025年", "breakdown": "age", "focus": "distribution"},
+    )
+
+    assert result["metric_id"] == "pgtsr_euploid_rate"
+    assert result["table"]["title"] == "PGT-SR 双年龄分层整倍体率"
+    assert result["table"]["columns"][:2] == ["年龄对象", "年龄段"]
+    assert result["table"]["rows"]
+
+
+def test_pgtsr_euploid_rate_respects_patient_age_scope_for_breakdown() -> None:
+    result = query_service.run(
+        "pgtsr_euploid_rate",
+        {
+            **BASE_FILTERS,
+            "time_range": "2025年",
+            "breakdown": "age",
+            "focus": "distribution",
+            "age_scope": "patient",
+        },
+    )
+
+    assert result["metric_id"] == "pgtsr_euploid_rate"
+    assert result["table"]["title"] == "PGT-SR 女方年龄分层整倍体率"
+    assert result["chart"]["title"] == "PGT-SR 女方年龄分层整倍体率"
+    assert result["table"]["rows"]
+    assert all(row[0] == "女方" for row in result["table"]["rows"])
+
+
+def test_pgtsr_euploid_rate_supports_sr_clinical_type_breakdown() -> None:
+    result = query_service.run(
+        "pgtsr_euploid_rate",
+        {**BASE_FILTERS, "time_range": "2025年", "breakdown": "sr_clinical_type", "focus": "distribution"},
+    )
+
+    assert result["metric_id"] == "pgtsr_euploid_rate"
+    assert result["table"]["title"] == "PGT-SR 临床指征分层整倍体率"
+    assert result["table"]["columns"][0] == "临床指征"
+    assert result["table"]["rows"]
+    assert len(result["table"]["rows"]) > 1
+    assert all(row[0] != "总体" for row in result["table"]["rows"])
+    assert "胚胎层面" in result["summary"]
+
+
+def test_pgtsr_euploid_rate_supports_multiple_sr_type_filters() -> None:
+    records = get_pgtsr_record_source().filter_records(hospital_id=BASE_FILTERS["hospital_id"])
+    clinical_types = sorted({record.sr_clinical_type for record in records if record.sr_clinical_type})
+    assert len(clinical_types) >= 2
+    selected_types = clinical_types[:2]
+
+    result = query_service.run(
+        "pgtsr_euploid_rate",
+        {
+            **BASE_FILTERS,
+            "time_range": "当前快照全部时间",
+            "breakdown": "overall",
+            "focus": "summary",
+            "sr_clinical_types": "|".join(selected_types),
+        },
+    )
+
+    assert result["metric_id"] == "pgtsr_euploid_rate"
+    assert result["filters"]["sr_clinical_types"] == "|".join(selected_types)
+    assert result["evidence"]["status"] == "ready"
+    assert result["evidence"]["record_count"] > 0
+    assert result["table"]["title"] == "PGT-SR 整倍体率总览"
+
+
+def test_pgtsr_result_overview_uses_euploid_display_label() -> None:
+    result = query_service.run(
+        "pgtsr_result_overview",
+        {**BASE_FILTERS, "time_range": "2025年", "breakdown": "overall", "focus": "summary"},
+    )
+
+    assert result["table"]["rows"][0][0] == "整倍体"
+    assert "整倍体占比" in result["summary"]
+
+
 def test_pgtsr_next_step_overview_returns_expected_columns() -> None:
     result = query_service.run(
         "pgtsr_next_step_overview",
@@ -252,4 +344,7 @@ def test_pgtsr_cycle_indicator_supports_sr_clinical_type_breakdown() -> None:
 
     assert result["metric_id"] == "pgtsr_cycle_indicator_overview"
     assert result["table"]["columns"][0] == "临床指征"
+    assert result["table"]["columns"][2:] == ["周期有整倍体胚胎占比", "周期无整倍体胚胎占比"]
     assert result["table"]["rows"]
+    assert all(row[0] != "总体" for row in result["table"]["rows"])
+    assert "周期层面" in result["summary"]

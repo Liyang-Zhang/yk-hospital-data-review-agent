@@ -10,6 +10,7 @@ SUPPORTED_METRIC_IDS = {
     "pgta_mosaic_abnormal",
     "pgta_cycle_indicator_overview",
     "pgta_special_cnv_overview",
+    "pgtsr_euploid_rate",
     "pgtsr_total_volume",
     "pgtsr_quality_overview",
     "pgtsr_result_overview",
@@ -51,6 +52,10 @@ class ParsedIntent(BaseModel):
     sr_clinical_type: str | None = Field(
         default=None,
         description="PGT-SR 项目sheet中的临床指征汇总分类。",
+    )
+    sr_clinical_types: list[str] = Field(
+        default_factory=list,
+        description="PGT-SR 多个临床指征筛选值，用于保留类似罗氏易位、平衡易位的并列问法。",
     )
     product_scope: str = Field(
         default="PGT-A",

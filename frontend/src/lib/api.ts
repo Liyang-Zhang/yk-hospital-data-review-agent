@@ -388,7 +388,7 @@ export async function fetchDemoMetadata(
 export async function createSession(hospital: {
   hospital_id: string;
   hospital_name: string;
-  product_scope?: string;
+  product_scope: string;
   hospital_scope_mode?: "single" | "all";
   accessible_hospital_ids?: string[];
   can_access_all_hospitals?: boolean;
@@ -401,7 +401,7 @@ export async function createSession(hospital: {
       hospital_id: hospital.hospital_id,
       hospital_name: hospital.hospital_name,
       host_session_id: "demo-host-session",
-      product_scope: hospital.product_scope ?? "PGT-A",
+      product_scope: hospital.product_scope,
       hospital_scope_mode: hospital.hospital_scope_mode ?? "single",
       accessible_hospital_ids: hospital.accessible_hospital_ids ?? [hospital.hospital_id],
       can_access_all_hospitals: hospital.can_access_all_hospitals ?? false,

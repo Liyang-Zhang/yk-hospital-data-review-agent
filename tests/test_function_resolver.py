@@ -167,3 +167,91 @@ def test_embryo_level_phrase_routes_to_embryo_euploid_rate() -> None:
 
     assert resolution.metric_id == "pgta_euploid_rate"
     assert resolution.candidate_metric_ids == ["pgta_euploid_rate"]
+
+
+def test_pgtsr_euploid_rate_routes_correctly() -> None:
+    parsed = _parsed()
+    parsed.product_scope = "PGT-SR"
+    resolution = function_resolver.resolve(
+        message="看一下 PGT-SR 的整倍体率",
+        parsed=parsed,
+    )
+
+    assert resolution.metric_id == "pgtsr_euploid_rate"
+    assert resolution.candidate_metric_ids == ["pgtsr_euploid_rate"]
+
+
+def test_pgtsr_cycle_terms_do_not_route_to_embryo_euploid_rate() -> None:
+    parsed = _parsed()
+    parsed.product_scope = "PGT-SR"
+    resolution = function_resolver.resolve(
+        message="看一下 PGT-SR 的周期整倍体结局",
+        parsed=parsed,
+    )
+
+    assert resolution.metric_id == "pgtsr_cycle_indicator_overview"
+    assert resolution.candidate_metric_ids == ["pgtsr_cycle_indicator_overview"]
+
+
+def test_pgtsr_embryo_euploid_by_clinical_type_routes_to_euploid_rate() -> None:
+    parsed = _parsed()
+    parsed.product_scope = "PGT-SR"
+    parsed.breakdown = "sr_clinical_type"
+    resolution = function_resolver.resolve(
+        message="按临床指征看一下 PGT-SR 胚胎整倍体率",
+        parsed=parsed,
+    )
+
+    assert resolution.metric_id == "pgtsr_euploid_rate"
+    assert resolution.candidate_metric_ids == ["pgtsr_euploid_rate"]
+
+
+def test_pgtsr_sr_type_embryo_euploid_routes_to_euploid_rate() -> None:
+    parsed = _parsed()
+    parsed.product_scope = "PGT-SR"
+    parsed.breakdown = "sr_clinical_type"
+    resolution = function_resolver.resolve(
+        message="罗氏易位、平衡易位、倒位等不同 SR 患者的胚胎整倍体率",
+        parsed=parsed,
+    )
+
+    assert resolution.metric_id == "pgtsr_euploid_rate"
+    assert resolution.candidate_metric_ids == ["pgtsr_euploid_rate"]
+
+
+def test_pgtsr_sr_type_cycle_euploid_routes_to_cycle_overview() -> None:
+    parsed = _parsed()
+    parsed.product_scope = "PGT-SR"
+    parsed.breakdown = "sr_clinical_type"
+    resolution = function_resolver.resolve(
+        message="罗氏易位、平衡易位、倒位等不同 SR 患者的周期整倍体率",
+        parsed=parsed,
+    )
+
+    assert resolution.metric_id == "pgtsr_cycle_indicator_overview"
+    assert resolution.candidate_metric_ids == ["pgtsr_cycle_indicator_overview"]
+
+
+def test_pgtsr_clinical_type_euploid_without_object_does_not_infer_cycle() -> None:
+    parsed = _parsed()
+    parsed.product_scope = "PGT-SR"
+    parsed.breakdown = "sr_clinical_type"
+    resolution = function_resolver.resolve(
+        message="按临床指征看一下 PGT-SR 整倍体率",
+        parsed=parsed,
+    )
+
+    assert resolution.metric_id == "pgtsr_euploid_rate"
+    assert resolution.candidate_metric_ids == ["pgtsr_euploid_rate"]
+
+
+def test_pgtsr_embryo_euploid_situation_routes_to_euploid_rate() -> None:
+    parsed = _parsed()
+    parsed.product_scope = "PGT-SR"
+    resolution = function_resolver.resolve(
+        message="看一下 PGT-SR 的胚胎整倍体情况",
+        parsed=parsed,
+    )
+
+    assert resolution.metric_id == "pgtsr_euploid_rate"
+    assert resolution.candidate_metric_ids == ["pgtsr_euploid_rate"]

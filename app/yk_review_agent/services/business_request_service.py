@@ -84,6 +84,7 @@ class BusinessRequestService:
                 "cycle_count",
                 "embryo_count",
                 "na_rate",
+                "euploid_rate",
                 "abnormal_rate",
                 "mosaic_only_rate",
             }
@@ -96,7 +97,6 @@ class BusinessRequestService:
                 )
             unsupported_reasons = {
                 "amplification_success_rate": "当前 PGT-SR 第一阶段未对扩增成功率建立正式业务口径。",
-                "euploid_rate": "当前 PGT-SR 第一阶段优先提供周期结局类指标，不直接承诺 PGT-A 风格胚胎整倍体率。",
                 "incidental_rate": "当前 PGT-SR 第一阶段未对意外发现类指标建立正式执行能力。",
             }
             return MetricCapability(
