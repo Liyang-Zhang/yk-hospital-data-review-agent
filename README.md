@@ -4,13 +4,16 @@
 
 当前第一版开发收敛范围：
 
-- 数据源切换为业务人工整合的快照文件：
+- 数据源当前处于 `snapshot mode`：
   - `docs/PGTA数据统计输出-2025年.xlsx`
   - `docs/PGTAH数据统计输出-2025年-上传微盘.xlsx`
   - `docs/PGTSR数据统计输出-2025年.xlsx`
   - `docs/2025-PGTM类全年输出.xlsx`
-- 当前真实执行范围固定为 `PGT-A`
-- `PGT-AH / PGT-SR / PGT-M` 已接入快照元信息层，用于能力说明和后续扩展
+- 当前部署执行源推荐使用已准备好的 `snapshot.db`
+- 当前真实执行范围：
+  - `PGT-A`
+  - `PGT-SR` 第一阶段
+- `PGT-AH / PGT-M` 已接入快照元信息层，用于能力说明和后续扩展
 - 时间筛选规则：
   - `年 / 月 / 季度` 优先基于业务统计月份字段
   - `按日` 基于审核时间字段
@@ -100,9 +103,19 @@ npm run dev
 ## Docker
 
 ```bash
-docker build -t yk-review-agent .
-docker run --rm -p 18765:8000 yk-review-agent
+docker build -t yk-review-agent-backend:session6 .
+docker build --build-arg VITE_API_BASE=/api/v1 -t yk-review-agent-frontend:session6 frontend
+
+mkdir -p deploy/data
+cp snapshot.db deploy/data/snapshot.db
+cp deploy/backend.server.env.example deploy/backend.server.env
+docker compose -f deploy/docker-compose.server.yml up -d
 ```
+
+部署说明见：
+
+- `docs/部署说明.md`
+- `docs/Session6-封装和部署规划-20260708.md`
 
 ## 说明
 
@@ -110,4 +123,4 @@ docker run --rm -p 18765:8000 yk-review-agent
 - `pyproject.toml` 仍是 Python 依赖的主定义
 - Docker 当前不依赖 `micromamba`
 - 未配置 `LLM_API_KEY` 时，后端会自动回退到本地规则解析
-- 当前产品处于 `snapshot mode`：依赖业务高质量 Excel 快照，而不是正式接口
+- Docker 部署默认不建库，运行时通过只读 volume 挂载已准备好的 `snapshot.db`

@@ -686,14 +686,34 @@ class AnswerabilityPolicy:
 
     def _follow_up_suggestions(self, metric_id: str) -> list[str]:
         mapping = {
+            "pgt_total_volume": [
+                "按月看一下 PGT-A 整倍体率变化",
+                "按年龄分层看一下 PGT-A 的整倍体率",
+                "看一下当前快照下的 PGT-A 质控情况",
+            ],
             "pgta_euploid_rate": [
                 "按年龄分层看一下 PGT-A 整倍体率",
                 "再看一下 PGT-A 的质控情况",
                 "补充 PGT-A 的结果分布",
             ],
+            "pgta_quality_overview": [
+                "看一下 PGT-A 的结果分布",
+                "看一下 PGT-A 的周期整倍体结局",
+                "按月看一下 PGT-A 整倍体率变化",
+            ],
             "pgta_mosaic_abnormal": [
                 "看一下 PGT-A 的周期整倍体结局",
                 "补充 PGT-A 的特殊 CNV 提示情况",
+                "再看一下 PGT-A 的质控情况",
+            ],
+            "pgta_cycle_indicator_overview": [
+                "按年龄分层看一下 PGT-A 的周期整倍体结局",
+                "看一下 PGT-A 的胚胎整倍体率",
+                "看一下当前快照下的 PGT-A 送检量",
+            ],
+            "pgta_special_cnv_overview": [
+                "看一下 PGT-A 的结果分布",
+                "看一下 PGT-A 的周期整倍体结局",
                 "再看一下 PGT-A 的质控情况",
             ],
             "pgtsr_euploid_rate": [
@@ -716,8 +736,22 @@ class AnswerabilityPolicy:
                 "PGT-SR 中罗氏易位患者的胚胎整倍体率情况",
                 "罗氏易位、平衡易位、倒位等不同 SR 患者的胚胎整倍体率",
             ],
+            "pgtsr_quality_overview": [
+                "看一下 PGT-SR 结果分布",
+                "看一下 PGT-SR 周期结局",
+                "看一下 PGT-SR 是否进入下一步易位筛查",
+            ],
+            "pgtsr_next_step_overview": [
+                "看一下 PGT-SR 结果分布",
+                "看一下 PGT-SR 周期结局",
+                "按临床指征看一下 PGT-SR 胚胎整倍体率",
+            ],
         }
-        return mapping.get(metric_id, CLARIFY_PROMPTS)
+        if metric_id in mapping:
+            return mapping[metric_id]
+        if metric_id.startswith("pgtsr_"):
+            return self._clarify_suggestions(product_scope="PGT-SR")
+        return self._clarify_suggestions(product_scope="PGT-A")
 
     def _evaluate_hospital_access(
         self,

@@ -115,6 +115,73 @@ SOURCE_CONFIGS: tuple[SnapshotSourceConfig, ...] = (
     ),
 )
 
+FALLBACK_SEMANTIC_FIELDS: dict[str, tuple[str, ...]] = {
+    "PGT-A": (
+        "hospital",
+        "stat_month",
+        "review_time",
+        "cycle_id",
+        "sample_id",
+        "sample_type",
+        "product_code",
+        "result_label",
+        "qc_result",
+        "female_age",
+        "bin_cv",
+        "cnv_result",
+        "cnv_hint",
+        "chromosome_location",
+        "result_detail",
+        "clinical_indicator",
+        "incidental_label",
+        "aneuploidy_label",
+    ),
+    "PGT-SR": (
+        "hospital",
+        "stat_month",
+        "review_time",
+        "cycle_id",
+        "sample_id",
+        "sample_type",
+        "product_code",
+        "result_label",
+        "qc_result",
+        "female_age",
+        "spouse_age",
+        "patient_karyotype",
+        "spouse_karyotype",
+        "clinical_indicator",
+        "marecs_stage2",
+        "marecs_family_type",
+        "next_step_screening",
+    ),
+    "PGT-AH": (
+        "hospital",
+        "stat_month",
+        "review_time",
+        "cycle_id",
+        "sample_id",
+        "sample_type",
+        "product_code",
+        "result_label",
+        "qc_result",
+        "female_age",
+    ),
+    "PGT-M": (
+        "hospital",
+        "stat_month",
+        "review_time",
+        "cycle_id",
+        "sample_id",
+        "sample_type",
+        "product_code",
+        "gene_name",
+        "disease_name",
+        "variant_result",
+        "family_type",
+    ),
+}
+
 
 class WorkbookSnapshotAdapter:
     def __init__(self, config: SnapshotSourceConfig) -> None:
@@ -128,6 +195,9 @@ class WorkbookSnapshotAdapter:
 
     @lru_cache(maxsize=1)
     def profile(self) -> SnapshotSourceProfile:
+        if not self.file_path.exists():
+            return self._missing_file_profile()
+
         workbook = load_workbook(self.file_path, read_only=True, data_only=True)
         sheet_name = self._resolve_sheet_name(workbook.sheetnames)
         sheet = workbook[sheet_name]
@@ -191,6 +261,24 @@ class WorkbookSnapshotAdapter:
             semantic_fields=tuple(sorted(semantic_fields)),
             execution_status=self.config.execution_status,
             notes=self.config.notes,
+        )
+
+    def _missing_file_profile(self) -> SnapshotSourceProfile:
+        return SnapshotSourceProfile(
+            product_code=self.config.product_code,
+            product_label=self.config.product_label,
+            data_source=f"{self.workbook_name} (not bundled)",
+            sheet_name=self.sheet_name,
+            row_count=0,
+            cycle_count=0,
+            snapshot_start=None,
+            snapshot_end=None,
+            semantic_fields=FALLBACK_SEMANTIC_FIELDS.get(self.config.product_code, ()),
+            execution_status=self.config.execution_status,
+            notes=(
+                *self.config.notes,
+                "部署镜像不内置源 Excel；运行数据由挂载的 snapshot.db 或后续实时 API 提供。",
+            ),
         )
 
     def _first_index(self, index: dict[str, int], canonical_field: str) -> int | None:

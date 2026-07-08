@@ -185,6 +185,9 @@ def test_multiturn_explicit_new_metric_overrides_previous_topic() -> None:
     assert second.structured_answer.metric_ids == ["pgta_quality_overview"]
     assert second.route_trace is not None
     assert second.route_trace.resolved_metric_id == "pgta_quality_overview"
+    assert second.follow_up_suggestions
+    assert all("PGT-SR" not in suggestion for suggestion in second.follow_up_suggestions)
+    assert any("PGT-A" in suggestion for suggestion in second.follow_up_suggestions)
 
 
 def test_special_cnv_oral_question_returns_special_cnv_result_card() -> None:

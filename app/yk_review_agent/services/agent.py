@@ -316,6 +316,12 @@ class ConversationAgent:
         )
 
     def _follow_ups(self, metric_id: str) -> list[str]:
+        if metric_id == "pgt_total_volume":
+            return [
+                "按月看一下 PGT-A 整倍体率变化",
+                "按年龄分层看一下 PGT-A 整倍体率",
+                "再看一下 PGT-A 的质控情况",
+            ]
         if metric_id == "pgta_euploid_rate":
             return [
                 "按年龄分层看一下 PGT-A 整倍体率",
@@ -332,6 +338,18 @@ class ConversationAgent:
             return [
                 "看一下 PGT-A 的周期整倍体结局",
                 "看一下 PGT-A 的特殊 CNV 提示情况",
+                "再看一下 PGT-A 的质控情况",
+            ]
+        if metric_id == "pgta_cycle_indicator_overview":
+            return [
+                "按年龄分层看一下 PGT-A 周期整倍体结局",
+                "看一下 PGT-A 的整倍体率",
+                "看一下当前快照下的 PGT-A 送检量",
+            ]
+        if metric_id == "pgta_special_cnv_overview":
+            return [
+                "看一下 PGT-A 的结果分布",
+                "看一下 PGT-A 的周期整倍体结局",
                 "再看一下 PGT-A 的质控情况",
             ]
         if metric_id == "pgtsr_euploid_rate":
@@ -351,6 +369,31 @@ class ConversationAgent:
                 "按临床指征统计下 PGT-SR 胚胎整倍体率",
                 "PGT-SR 中罗氏易位患者的胚胎整倍体率情况",
                 "罗氏易位、平衡易位、倒位等不同 SR 患者的胚胎整倍体率",
+            ]
+        if metric_id == "pgtsr_quality_overview":
+            return [
+                "看一下 PGT-SR 结果分布",
+                "看一下 PGT-SR 周期结局",
+                "看一下 PGT-SR 是否进入下一步易位筛查",
+            ]
+        if metric_id == "pgtsr_result_overview":
+            return [
+                "看一下 PGT-SR 周期结局",
+                "看一下 PGT-SR 是否进入下一步易位筛查",
+                "按临床指征看一下 PGT-SR 周期结局",
+            ]
+        if metric_id == "pgtsr_next_step_overview":
+            return [
+                "看一下 PGT-SR 结果分布",
+                "看一下 PGT-SR 周期结局",
+                "按临床指征看一下 PGT-SR 胚胎整倍体率",
+            ]
+        if metric_id.startswith("pgtsr_"):
+            return [
+                "看一下 PGT-SR 结果分布",
+                "看一下 PGT-SR 的胚胎整倍体率",
+                "看一下当前快照下的 PGT-SR 送检量",
+                "看一下 PGT-SR 质控情况",
             ]
         return [
             "看一下当前快照下的 PGT-A 送检量",
