@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { ChatResponse, ResultCard } from "../lib/api";
+import { downloadChartPng, downloadTableCsv } from "../lib/export";
 
 type Props = {
   response: ChatResponse;
@@ -224,9 +225,14 @@ function TableSection({
     <section className="result-card result-card-table">
       <div className="result-card-head">
         <div className="result-card-label">{card.title}</div>
-        {typeof table.total_rows === "number" ? (
-          <div className="result-card-meta">共 {table.total_rows} 行</div>
-        ) : null}
+        <div className="result-card-actions">
+          {typeof table.total_rows === "number" ? (
+            <div className="result-card-meta">共 {table.total_rows} 行</div>
+          ) : null}
+          <button className="export-action" onClick={() => downloadTableCsv(card)} type="button">
+            导出表格
+          </button>
+        </div>
       </div>
       <div className="table-shell">
         <table>
@@ -270,7 +276,12 @@ function ChartSection({
 }) {
   return (
     <section className={`result-card result-card-chart${featured ? " result-card-chart-hero" : ""}`}>
-      <div className="result-card-label">{card.title}</div>
+      <div className="result-card-head">
+        <div className="result-card-label">{card.title}</div>
+        <button className="export-action" onClick={() => void downloadChartPng(card)} type="button">
+          导出图片
+        </button>
+      </div>
       <ChartCard card={card} featured={featured} />
     </section>
   );

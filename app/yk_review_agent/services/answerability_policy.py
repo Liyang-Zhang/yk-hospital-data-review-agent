@@ -59,6 +59,7 @@ class AnswerabilityPolicy:
                 if parsed.sr_clinical_types and parsed.breakdown != "sr_clinical_type"
                 else {}
             ),
+            **({"sr_translocation_pair": parsed.sr_translocation_pair} if parsed.sr_translocation_pair else {}),
             **({"age_scope": parsed.age_scope} if parsed.age_scope else {}),
         }
         time_grain = self._infer_time_grain(parsed.time_range, parsed.breakdown)
@@ -253,6 +254,70 @@ class AnswerabilityPolicy:
                 normalized_message=parsed.normalized_message,
             )
 
+        if parsed.sr_translocation_pair or parsed.breakdown == "sr_translocation_pair":
+            filters["sr_clinical_type"] = "平衡易位"
+            if product_scope != "PGT-SR":
+                return AnalysisPlan(
+                    product_scope=product_scope,
+                    breakdown=parsed.breakdown,
+                    time_grain=time_grain,
+                    filters=filters,
+                    answer_mode="refuse",
+                    rationale="当前“平衡易位染色体对整倍体率”能力仅支持 PGT-SR 产品。",
+                    suggestions=REFUSE_SUGGESTIONS,
+                    candidate_metric_ids=candidate_ids,
+                    normalized_message=parsed.normalized_message,
+                )
+            if metric_id != "pgtsr_euploid_rate":
+                return AnalysisPlan(
+                    product_scope=product_scope,
+                    breakdown=parsed.breakdown,
+                    time_grain=time_grain,
+                    filters=filters,
+                    answer_mode="refuse",
+                    rationale="当前“平衡易位染色体对”仅支持用于 PGT-SR 胚胎层面整倍体率，不支持周期结局或其他指标。",
+                    suggestions=REFUSE_SUGGESTIONS,
+                    candidate_metric_ids=candidate_ids,
+                    normalized_message=parsed.normalized_message,
+                )
+            required_fields = {"patient_karyotype", "spouse_karyotype", "clinical_indicator"}
+            if not required_fields.issubset(active_data_capabilities(product_scope)):
+                return AnalysisPlan(
+                    product_scope=product_scope,
+                    breakdown=parsed.breakdown,
+                    time_grain=time_grain,
+                    filters=filters,
+                    answer_mode="refuse",
+                    rationale="当前数据源还不能稳定支撑“平衡易位染色体对整倍体率”的业务语义。",
+                    suggestions=REFUSE_SUGGESTIONS,
+                    candidate_metric_ids=candidate_ids,
+                    normalized_message=parsed.normalized_message,
+                )
+            if parsed.sr_translocation_pair and parsed.breakdown not in {"overall", "sr_translocation_pair"}:
+                return AnalysisPlan(
+                    product_scope=product_scope,
+                    breakdown=parsed.breakdown,
+                    time_grain=time_grain,
+                    filters=filters,
+                    answer_mode="refuse",
+                    rationale="当前第一版暂不支持在指定平衡易位染色体对后再叠加时间、年龄或其他拆分维度。",
+                    suggestions=REFUSE_SUGGESTIONS,
+                    candidate_metric_ids=candidate_ids,
+                    normalized_message=parsed.normalized_message,
+                )
+            if parsed.breakdown == "sr_translocation_pair" and time_grain != "overall":
+                return AnalysisPlan(
+                    product_scope=product_scope,
+                    breakdown=parsed.breakdown,
+                    time_grain=time_grain,
+                    filters=filters,
+                    answer_mode="refuse",
+                    rationale="当前第一版暂不支持“平衡易位染色体对整倍体率”再按时间维度拆分，请先看总体或指定某个染色体对。",
+                    suggestions=REFUSE_SUGGESTIONS,
+                    candidate_metric_ids=candidate_ids,
+                    normalized_message=parsed.normalized_message,
+                )
+
         if (
             product_scope == "PGT-SR"
             and len(parsed.sr_clinical_types) >= 2
@@ -434,6 +499,8 @@ class AnswerabilityPolicy:
 
     def _is_domain_relevant(self, message: str) -> bool:
         normalized = message.lower()
+        if re.search(r"t\(\s*[0-9xyXY]+\s*;\s*[0-9xyXY]+\s*\)", message) or "染色体对" in message:
+            return True
         if any(term.lower() in normalized for term in SUPPORTED_DOMAIN_TERMS):
             return True
         return False
@@ -639,6 +706,8 @@ class AnswerabilityPolicy:
             return "overall"
         if breakdown == "sr_clinical_type":
             return "overall"
+        if breakdown == "sr_translocation_pair":
+            return "overall"
         if re.search(r"(20\d{2}年)?([1-9]|1[0-2])月([1-9]|[12]\d|3[01])[日号]", time_range) or re.search(
             r"(20\d{2})[-/](0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])",
             time_range,
@@ -660,6 +729,7 @@ class AnswerabilityPolicy:
             "result": "结果结构",
             "qc": "质控",
             "sr_clinical_type": "临床指征",
+            "sr_translocation_pair": "易位类型",
         }
         return mapping.get(breakdown, breakdown)
 
@@ -681,6 +751,7 @@ class AnswerabilityPolicy:
             "patient_age_range": "受检人年龄范围",
             "spouse_age_range": "配偶年龄范围",
             "sr_clinical_type": "临床指征",
+            "sr_translocation_pair": "易位类型",
         }
         return mapping.get(filter_name, filter_name)
 

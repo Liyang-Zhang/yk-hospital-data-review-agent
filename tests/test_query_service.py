@@ -281,6 +281,44 @@ def test_pgtsr_euploid_rate_supports_sr_clinical_type_breakdown() -> None:
     assert "胚胎层面" in result["summary"]
 
 
+def test_pgtsr_euploid_rate_supports_translocation_pair_breakdown() -> None:
+    result = query_service.run(
+        "pgtsr_euploid_rate",
+        {
+            "time_range": "当前快照全部时间",
+            "breakdown": "sr_translocation_pair",
+            "focus": "distribution",
+            "sr_clinical_type": "平衡易位",
+        },
+    )
+
+    assert result["metric_id"] == "pgtsr_euploid_rate"
+    assert result["table"]["title"] == "PGT-SR 平衡易位类型分层整倍体率"
+    assert result["table"]["columns"][0] == "易位类型"
+    assert result["table"]["rows"]
+    row_labels = [row[0] for row in result["table"]["rows"]]
+    assert any(label.startswith("t(") for label in row_labels)
+    assert "其他低样本类型" in row_labels
+
+
+def test_pgtsr_euploid_rate_supports_specific_translocation_pair_filter() -> None:
+    result = query_service.run(
+        "pgtsr_euploid_rate",
+        {
+            "time_range": "当前快照全部时间",
+            "breakdown": "overall",
+            "focus": "summary",
+            "sr_clinical_type": "平衡易位",
+            "sr_translocation_pair": "t(1;5)",
+        },
+    )
+
+    assert result["metric_id"] == "pgtsr_euploid_rate"
+    assert result["filters"]["sr_translocation_pair"] == "t(1;5)"
+    assert result["table"]["title"] == "PGT-SR 整倍体率总览"
+    assert "t(1;5)" in result["summary"]
+
+
 def test_pgtsr_euploid_rate_supports_multiple_sr_type_filters() -> None:
     records = get_pgtsr_record_source().filter_records(hospital_id=BASE_FILTERS["hospital_id"])
     clinical_types = sorted({record.sr_clinical_type for record in records if record.sr_clinical_type})

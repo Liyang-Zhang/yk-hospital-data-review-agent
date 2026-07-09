@@ -9,6 +9,11 @@ from yk_review_agent.services.pgta_detail_dataset import DetailRecord
 from yk_review_agent.services.pgta_record_source import get_pgta_record_source
 from yk_review_agent.services.pgtsr_record_source import get_pgtsr_record_source
 from yk_review_agent.services.pgtsr_sqlite import PGTSRRecord
+from yk_review_agent.services.pgtsr_translocation import (
+    LOW_SAMPLE_TRANSLOCATION_PAIR_LABEL,
+    NON_TYPICAL_BALANCED_REARRANGEMENT_LABEL,
+    normalize_translocation_pair,
+)
 
 
 class QueryService:
@@ -67,6 +72,10 @@ class QueryService:
         dataset = get_pgtsr_record_source()
         time_filter = _parse_time_filter(filters.get("time_range", ""))
         breakdown = filters.get("breakdown", "overall")
+        uses_translocation_pair = bool(
+            filters.get("sr_translocation_pair") or breakdown == "sr_translocation_pair"
+        )
+        sr_clinical_type = filters.get("sr_clinical_type")
         records = dataset.filter_records(
             hospital_id=filters.get("hospital_id"),
             year=time_filter["year"],
@@ -79,10 +88,16 @@ class QueryService:
             end_day=time_filter["end_day"],
             patient_age_range=filters.get("patient_age_range"),
             spouse_age_range=filters.get("spouse_age_range"),
-            sr_clinical_type=filters.get("sr_clinical_type"),
+            sr_clinical_type=None
+            if uses_translocation_pair and sr_clinical_type == "平衡易位"
+            else sr_clinical_type,
         )
         if sr_clinical_types := _parse_multi_value_filter(filters.get("sr_clinical_types")):
             records = [item for item in records if item.sr_clinical_type in sr_clinical_types]
+        if uses_translocation_pair and sr_clinical_type == "平衡易位":
+            records = [item for item in records if _is_pgtsr_balanced_translocation_candidate(item)]
+        if sr_translocation_pair := filters.get("sr_translocation_pair"):
+            records = [item for item in records if _pgtsr_translocation_pair_key(item) == sr_translocation_pair]
         if not records:
             return {
                 "metric_id": metric_id,
@@ -608,6 +623,8 @@ class QueryService:
     def _pgtsr_euploid_rate(self, records: list[PGTSRRecord], filters: dict[str, str], breakdown: str) -> dict:
         if breakdown == "age":
             return self._pgtsr_age_distribution(records, filters)
+        if breakdown == "sr_translocation_pair":
+            return self._pgtsr_translocation_pair_distribution(records, filters)
 
         group_breakdown = breakdown if breakdown in {"month", "quarter", "day", "sr_clinical_type"} else "overall"
         grouped = _group_pgtsr_records(records, group_breakdown)
@@ -625,6 +642,17 @@ class QueryService:
 
         total = len(records)
         euploid = sum(1 for item in records if item.is_euploid)
+        translocation_pair = filters.get("sr_translocation_pair")
+        if translocation_pair:
+            summary = (
+                f"当前快照下，PGT-SR 平衡易位中 {translocation_pair} 胚胎层面共检测 {total} 个胚胎，"
+                f"其中整倍体 {euploid} 个，整倍体率为 {_pct(euploid, total)}。"
+            )
+        else:
+            summary = (
+                f"当前快照下，PGT-SR 胚胎层面共检测 {total} 个胚胎，其中整倍体 {euploid} 个，"
+                f"整倍体率为 {_pct(euploid, total)}。"
+            )
         chart = None
         if categories:
             chart = {
@@ -636,10 +664,7 @@ class QueryService:
         return {
             "metric_id": "pgtsr_euploid_rate",
             "filters": filters,
-            "summary": (
-                f"当前快照下，PGT-SR 胚胎层面共检测 {total} 个胚胎，其中整倍体 {euploid} 个，"
-                f"整倍体率为 {_pct(euploid, total)}。"
-            ),
+            "summary": summary,
             "evidence": {
                 "status": "ready",
                 "record_count": total,
@@ -653,6 +678,68 @@ class QueryService:
                 "rows": rows,
             },
             "chart": chart,
+        }
+
+    def _pgtsr_translocation_pair_distribution(self, records: list[PGTSRRecord], filters: dict[str, str]) -> dict:
+        grouped: dict[str, list[PGTSRRecord]] = defaultdict(list)
+        for item in records:
+            grouped[_pgtsr_translocation_pair_key(item)].append(item)
+
+        rows = []
+        categories: list[str] = []
+        values: list[float] = []
+        low_sample_bucket: list[PGTSRRecord] = []
+
+        for key, bucket in sorted(grouped.items(), key=lambda pair: (-len(pair[1]), pair[0])):
+            if key != NON_TYPICAL_BALANCED_REARRANGEMENT_LABEL and len(bucket) < 10:
+                low_sample_bucket.extend(bucket)
+                continue
+            total = len(bucket)
+            euploid = sum(1 for item in bucket if item.is_euploid)
+            rate_value = _pct_value(euploid, total)
+            rows.append([key, total, euploid, f"{rate_value:.1f}%"])
+            categories.append(key)
+            values.append(round(rate_value, 1))
+
+        if low_sample_bucket:
+            total = len(low_sample_bucket)
+            euploid = sum(1 for item in low_sample_bucket if item.is_euploid)
+            rate_value = _pct_value(euploid, total)
+            rows.append([LOW_SAMPLE_TRANSLOCATION_PAIR_LABEL, total, euploid, f"{rate_value:.1f}%"])
+            categories.append(LOW_SAMPLE_TRANSLOCATION_PAIR_LABEL)
+            values.append(round(rate_value, 1))
+
+        total = len(records)
+        euploid = sum(1 for item in records if item.is_euploid)
+        return {
+            "metric_id": "pgtsr_euploid_rate",
+            "filters": filters,
+            "summary": (
+                f"当前快照下，PGT-SR 平衡易位胚胎层面共检测 {total} 个胚胎，其中整倍体 {euploid} 个，"
+                f"已按染色体对归一到 t(1;5) 这类易位类型展示整倍体率；低样本类型已归并。"
+            ),
+            "evidence": {
+                "status": "ready",
+                "record_count": total,
+                "euploid_count": euploid,
+                "breakdown": "sr_translocation_pair",
+                "warnings": [
+                    "当前 PGT-SR 的整倍体率按结果解释中的“未见异常”口径统计。",
+                    "当前易位类型按核型中的染色体对归一，不区分具体臂位点。",
+                    "样本数低于 10 的类型已合并为“其他低样本类型”。",
+                ],
+            },
+            "table": {
+                "title": "PGT-SR 平衡易位类型分层整倍体率",
+                "columns": ["易位类型", "检测胚胎数", "整倍体胚胎数", "整倍体率"],
+                "rows": rows,
+            },
+            "chart": {
+                "title": "PGT-SR 平衡易位类型分层整倍体率",
+                "chart_type": "bar",
+                "categories": categories,
+                "series": [{"name": "整倍体率", "values": values}],
+            },
         }
 
     def _pgtsr_age_distribution(self, records: list[PGTSRRecord], filters: dict[str, str]) -> dict:
@@ -873,6 +960,7 @@ class QueryService:
             "result": "结果类型",
             "qc": "质控类型",
             "sr_clinical_type": "临床指征",
+            "sr_translocation_pair": "易位类型",
         }
         return mapping.get(breakdown, "维度")
 
@@ -916,6 +1004,7 @@ class QueryService:
             "quarter": "PGT-SR 分季度整倍体率",
             "day": "PGT-SR 分日期整倍体率",
             "sr_clinical_type": "PGT-SR 临床指征分层整倍体率",
+            "sr_translocation_pair": "PGT-SR 平衡易位类型分层整倍体率",
             "overall": "PGT-SR 整倍体率总览",
         }
         return mapping.get(breakdown, "PGT-SR 整倍体率总览")
@@ -948,10 +1037,29 @@ def _group_pgtsr_records(records: list[PGTSRRecord], breakdown: str) -> dict[str
             key = f"{year}-{month:02d}"
         elif breakdown == "sr_clinical_type":
             key = item.sr_clinical_type or "未填写"
+        elif breakdown == "sr_translocation_pair":
+            key = _pgtsr_translocation_pair_key(item)
         else:
             key = "总体"
         grouped[key].append(item)
     return dict(sorted(grouped.items(), key=lambda pair: pair[0]))
+
+
+def _pgtsr_translocation_pair_key(item: PGTSRRecord) -> str:
+    patient_pair = normalize_translocation_pair(item.patient_karyotype)
+    if patient_pair:
+        return patient_pair
+    spouse_pair = normalize_translocation_pair(item.spouse_karyotype)
+    if spouse_pair:
+        return spouse_pair
+    return NON_TYPICAL_BALANCED_REARRANGEMENT_LABEL
+
+
+def _is_pgtsr_balanced_translocation_candidate(item: PGTSRRecord) -> bool:
+    if normalize_translocation_pair(item.patient_karyotype) or normalize_translocation_pair(item.spouse_karyotype):
+        return True
+    clinical_type = (item.sr_clinical_type or "").strip()
+    return clinical_type in {"平衡易位", "易位"}
 
 
 def _bucket_key(item: DetailRecord, breakdown: str) -> str:

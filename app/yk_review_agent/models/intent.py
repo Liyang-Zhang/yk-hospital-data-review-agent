@@ -57,13 +57,17 @@ class ParsedIntent(BaseModel):
         default_factory=list,
         description="PGT-SR 多个临床指征筛选值，用于保留类似罗氏易位、平衡易位的并列问法。",
     )
+    sr_translocation_pair: str | None = Field(
+        default=None,
+        description="PGT-SR 平衡易位染色体对归一值，例如 t(1;5)。",
+    )
     product_scope: str = Field(
         default="PGT-A",
-        description="当前产品范围。第一版只允许 PGT-A。",
+        description="当前产品范围。当前真实执行支持 PGT-A 与 PGT-SR 第一阶段。",
     )
     breakdown: str = Field(
         default="overall",
-        description="输出拆分维度，可选 overall/month/quarter/day/age/result/qc/sr_clinical_type。",
+        description="输出拆分维度，可选 overall/month/quarter/day/age/result/qc/sr_clinical_type/sr_translocation_pair。",
     )
     focus: str = Field(
         default="summary",

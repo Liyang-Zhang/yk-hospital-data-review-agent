@@ -638,6 +638,102 @@ def test_pgtsr_embryo_euploid_by_clinical_type_answers() -> None:
     assert plan.metric_family == "pgtsr_euploid_rate"
 
 
+def test_pgtsr_translocation_pair_euploid_answers() -> None:
+    message = "t(1;5) 的 PGT-SR 胚胎整倍体率是多少"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.metric_id == "pgtsr_euploid_rate"
+    assert parsed.sr_translocation_pair == "t(1;5)"
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_euploid_rate"
+    assert plan.filters["sr_clinical_type"] == "平衡易位"
+    assert plan.filters["sr_translocation_pair"] == "t(1;5)"
+
+
+def test_pgtsr_translocation_pair_breakdown_answers() -> None:
+    message = "按平衡易位类型看 PGT-SR 胚胎整倍体率"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.breakdown == "sr_translocation_pair"
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_euploid_rate"
+    assert plan.filters["sr_clinical_type"] == "平衡易位"
+
+
+def test_pgtsr_balanced_translocation_different_types_answers() -> None:
+    message = "平衡易位不同类型得胚胎整倍体率统计"
+    parsed, plan = _evaluate(message, context_product_scope="PGT-SR")
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.breakdown == "sr_translocation_pair"
+    assert parsed.sr_translocation_pair is None
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_euploid_rate"
+    assert plan.filters["sr_clinical_type"] == "平衡易位"
+
+
+def test_pgtsr_translocation_pair_example_breakdown_answers_without_pair_filter() -> None:
+    message = "按t(1;5)这类染色体对做总览分组"
+    parsed, plan = _evaluate(message, context_product_scope="PGT-SR")
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.breakdown == "sr_translocation_pair"
+    assert parsed.sr_translocation_pair is None
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_euploid_rate"
+    assert "sr_translocation_pair" not in plan.filters
+    assert plan.filters["sr_clinical_type"] == "平衡易位"
+
+
+def test_pgtsr_specific_translocation_pair_type_answers_without_breakdown() -> None:
+    message = "平衡易位中t(1;5)类型得胚胎整倍体率"
+    parsed, plan = _evaluate(message, context_product_scope="PGT-SR")
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.breakdown == "overall"
+    assert parsed.sr_translocation_pair == "t(1;5)"
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_euploid_rate"
+    assert plan.filters["sr_clinical_type"] == "平衡易位"
+    assert plan.filters["sr_translocation_pair"] == "t(1;5)"
+
+
+def test_pgtsr_this_kind_of_translocation_pair_answers_as_specific_filter() -> None:
+    message = "平衡易位中t(1;5)这类平衡易位的胚胎整倍体率"
+    parsed, plan = _evaluate(message, context_product_scope="PGT-SR")
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.breakdown == "overall"
+    assert parsed.sr_translocation_pair == "t(1;5)"
+    assert plan.answer_mode == "answer"
+    assert plan.metric_family == "pgtsr_euploid_rate"
+    assert plan.filters["sr_clinical_type"] == "平衡易位"
+    assert plan.filters["sr_translocation_pair"] == "t(1;5)"
+
+
+def test_pgtsr_translocation_pair_with_month_refuses() -> None:
+    message = "按月看一下 t(1;5) 的 PGT-SR 整倍体率变化"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-SR"
+    assert parsed.sr_translocation_pair == "t(1;5)"
+    assert parsed.breakdown == "month"
+    assert plan.answer_mode == "refuse"
+    assert "暂不支持" in plan.rationale
+
+
+def test_non_pgtsr_translocation_pair_refuses() -> None:
+    message = "看一下 PGT-A 里 t(1;5) 的整倍体率"
+    parsed, plan = _evaluate(message)
+
+    assert parsed.product_scope == "PGT-A"
+    assert parsed.sr_translocation_pair == "t(1;5)"
+    assert plan.answer_mode == "refuse"
+    assert "仅支持 PGT-SR" in plan.rationale
+
+
 def test_pgtsr_embryo_euploid_situation_answers_without_clarify() -> None:
     message = "看一下 PGT-SR 的胚胎整倍体情况"
     parsed, plan = _evaluate(message, context_product_scope="PGT-SR")

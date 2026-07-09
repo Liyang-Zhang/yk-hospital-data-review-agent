@@ -83,10 +83,14 @@ class FunctionResolver:
                 return 0
             score += self._term_score(message, metric.hard_terms, hard=True)
             score += self._term_score(message, metric.soft_terms, hard=False)
+            if parsed.breakdown == "sr_translocation_pair" or parsed.sr_translocation_pair:
+                score += 10
             if parsed.breakdown == "age" and score > 0:
                 score += 5
             if parsed.breakdown == "sr_clinical_type" and score > 0:
                 score += 5
+            if parsed.breakdown == "sr_translocation_pair" and score > 0:
+                score += 6
             if self._contains_any(
                 message,
                 (

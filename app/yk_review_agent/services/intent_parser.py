@@ -12,6 +12,7 @@ from yk_review_agent.models.session import SessionContext
 from yk_review_agent.services.business_request_service import business_request_service
 from yk_review_agent.services.followup_resolver import follow_up_resolver
 from yk_review_agent.services.function_resolver import function_resolver
+from yk_review_agent.services.pgtsr_translocation import normalize_translocation_pair
 from yk_review_agent.services.question_normalizer import question_normalizer
 
 
@@ -102,7 +103,7 @@ class IntentParserService:
                 "必须返回 unsupported_reason，且 metric_id 置空。"
                 "如果用户问题和医院PGT数据分析无关，例如天气、闲聊、通用知识，也必须拒答。"
                 "time_range 要尽量保留用户原话中的时间表达；如果原话没有时间，就使用当前会话时间范围或当前快照全部时间。"
-                "breakdown 只能从 overall/month/quarter/day/age/result/qc/sr_clinical_type 中选择。"
+                "breakdown 只能从 overall/month/quarter/day/age/result/qc/sr_clinical_type/sr_translocation_pair 中选择。"
                 "focus 只能表达 summary/trend/rate/distribution。"
                 "不要发散分析，不要补充不存在的产品范围。"
             ),
@@ -170,6 +171,7 @@ class IntentParserService:
             age_scope=parsed.age_scope,
             sr_clinical_type=parsed.sr_clinical_type,
             sr_clinical_types=parsed.sr_clinical_types,
+            sr_translocation_pair=parsed.sr_translocation_pair,
             has_explicit_age_range=parsed.has_explicit_age_range,
             has_explicit_hospital_scope=parsed.has_explicit_hospital_scope,
             requested_hospital_id=parsed.requested_hospital_id,
@@ -197,6 +199,7 @@ class IntentParserService:
                     if parsed.sr_clinical_types
                     else {}
                 ),
+                **({"sr_translocation_pair": parsed.sr_translocation_pair} if parsed.sr_translocation_pair else {}),
                 **({"age_scope": parsed.age_scope} if parsed.age_scope else {}),
             },
             unsupported_reason=parsed.unsupported_reason,
@@ -207,10 +210,19 @@ class IntentParserService:
         explicit_time_range = self._extract_time_range(message)
         age_range = self._extract_age_range(message)
         age_scope = self._extract_age_scope(message)
-        sr_clinical_type = self._extract_sr_clinical_type(message)
+        raw_sr_translocation_pair = self._extract_sr_translocation_pair(message)
+        sr_clinical_type = self._extract_sr_clinical_type(message) or (
+            "平衡易位" if raw_sr_translocation_pair else None
+        )
         requested_hospital_id = question_normalizer.extract_explicit_hospital(message)
         time_range = explicit_time_range or context.time_range or "当前快照全部时间"
-        breakdown = self._infer_breakdown(message, age_range, sr_clinical_type)
+        breakdown = self._infer_breakdown(message, age_range, sr_clinical_type, raw_sr_translocation_pair)
+        sr_translocation_pair = (
+            None
+            if breakdown == "sr_translocation_pair" and self._uses_translocation_pair_as_example(message)
+            else raw_sr_translocation_pair
+        )
+        sr_clinical_type = sr_clinical_type or ("平衡易位" if sr_translocation_pair or breakdown == "sr_translocation_pair" else None)
         focus = self._infer_focus(message)
         topic = "结构化业务统计请求" if business_request.request_kind == "structured_business_request" else self._topic_for("", breakdown, focus)
 
@@ -232,6 +244,7 @@ class IntentParserService:
             age_scope=age_scope,
             sr_clinical_type=sr_clinical_type,
             sr_clinical_types=self._extract_sr_clinical_types(message),
+            sr_translocation_pair=sr_translocation_pair,
             has_explicit_age_range=age_range is not None,
             has_explicit_hospital_scope=requested_hospital_id is not None,
             requested_hospital_id=requested_hospital_id,
@@ -299,8 +312,42 @@ class IntentParserService:
             return f"20{short_year_only.group(1)}年"
         return None
 
-    def _infer_breakdown(self, message: str, age_range: str | None, sr_clinical_type: str | None) -> str:
+    def _infer_breakdown(
+        self,
+        message: str,
+        age_range: str | None,
+        sr_clinical_type: str | None,
+        sr_translocation_pair: str | None,
+    ) -> str:
         normalized_message = message.replace(" ", "")
+        has_translocation_pair_group_signal = (
+            "染色体对" in message
+            or "平衡易位类型" in message
+            or "易位类型" in message
+            or (
+                sr_clinical_type == "平衡易位"
+                and "类型" in message
+                and any(keyword in normalized_message for keyword in ("不同", "各", "每", "按", "分组", "分层", "拆分", "统计"))
+            )
+        )
+        if has_translocation_pair_group_signal and (
+            "整倍体" in message
+            or "胚胎" in message
+            or any(keyword in normalized_message for keyword in ("总览", "分组", "分层", "统计", "拆分"))
+        ):
+            return "sr_translocation_pair"
+        if (
+            ("平衡易位类型" in message or "染色体对" in message or "易位类型" in message)
+            and ("整倍体" in message or "胚胎" in message)
+        ) or (
+            sr_translocation_pair
+            and any(keyword in normalized_message for keyword in ("不同类型", "按类型", "分类型", "类型分组", "总览分组", "拆分"))
+        ):
+            return "sr_translocation_pair"
+        if sr_translocation_pair and "整倍体" in message and not any(
+            keyword in message for keyword in ("按月", "每月", "月度", "趋势", "变化", "波动", "按年龄", "年龄分层")
+        ):
+            return "overall"
         if any(
             keyword in normalized_message.lower()
             for keyword in (
@@ -370,6 +417,10 @@ class IntentParserService:
             return "PGT-M"
         if any(keyword in message for keyword in ("PGT-AH", "PGTAH")):
             return "PGT-AH"
+        if any(keyword in message for keyword in ("PGT-A", "PGTA")):
+            return "PGT-A"
+        if self._extract_sr_translocation_pair(message):
+            return "PGT-SR"
         if any(keyword in message for keyword in ("全产品", "总体")):
             return "ALL"
         return fallback_product_scope or "PGT-A"
@@ -419,6 +470,15 @@ class IntentParserService:
         )
         return [candidate for candidate in candidates if candidate in message]
 
+    def _extract_sr_translocation_pair(self, message: str) -> str | None:
+        return normalize_translocation_pair(message)
+
+    def _uses_translocation_pair_as_example(self, message: str) -> bool:
+        normalized_message = message.replace(" ", "")
+        has_example_marker = any(keyword in normalized_message for keyword in ("这种", "这类", "例如", "比如", "类似"))
+        has_group_context = any(keyword in normalized_message for keyword in ("染色体对", "总览", "分组", "分层", "不同", "拆分"))
+        return has_example_marker and has_group_context
+
     def _topic_for(self, metric_id: str, breakdown: str, focus: str) -> str:
         mapping = {
             "pgt_total_volume": "PGT-A 送检量",
@@ -438,6 +498,8 @@ class IntentParserService:
             return mapping.get(metric_id, "未识别问题")
         if breakdown == "sr_clinical_type":
             return "PGT-SR 临床指征分组分析"
+        if breakdown == "sr_translocation_pair":
+            return "PGT-SR 平衡易位类型分组分析"
         if breakdown == "age":
             return "年龄分层分析"
         if breakdown == "qc":

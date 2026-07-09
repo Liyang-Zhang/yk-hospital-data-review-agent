@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { ChatResponse, ResultCard } from "../lib/api";
+import { downloadChartPng, downloadTableCsv } from "../lib/export";
 
 type Props = {
   response: ChatResponse;
@@ -47,7 +48,12 @@ function UserChartNote({ card }: { card: Extract<ResultCard, { type: "chart" }> 
           <div className="user-card-label">趋势概览</div>
           <h3>{card.chart.title}</h3>
         </div>
-        <span className="user-card-meta">{firstSeries?.name ?? "当前指标"}</span>
+        <div className="user-card-actions">
+          <span className="user-card-meta">{firstSeries?.name ?? "当前指标"}</span>
+          <button className="export-action export-action-user" onClick={() => void downloadChartPng(card)} type="button">
+            导出图片
+          </button>
+        </div>
       </div>
       <div className="user-mini-bars" aria-label={card.chart.title}>
         {card.chart.categories.map((category, index) => {
@@ -92,9 +98,14 @@ function UserTable({ card }: { card: Extract<ResultCard, { type: "table" }> }) {
           <div className="user-card-label">{card.title}</div>
           <h3>{table.title}</h3>
         </div>
-        {typeof table.total_rows === "number" ? (
-          <span className="user-card-meta">共 {table.total_rows} 行</span>
-        ) : null}
+        <div className="user-card-actions">
+          {typeof table.total_rows === "number" ? (
+            <span className="user-card-meta">共 {table.total_rows} 行</span>
+          ) : null}
+          <button className="export-action export-action-user" onClick={() => downloadTableCsv(card)} type="button">
+            导出表格
+          </button>
+        </div>
       </div>
       <div className="user-table-shell">
         <table>
